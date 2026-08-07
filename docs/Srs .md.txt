@@ -1,0 +1,101 @@
+# Software Requirements Specification (SRS)
+
+**Project Name:** DocFlow *(Working Title)*
+
+**Version:** 1.0
+
+**Document Status:** Draft
+
+**Prepared By:** Prashant Goswami
+
+**Project Type:** Software as a Service (SaaS)
+
+**Date:** August 2026
+
+---
+
+# 1. Introduction
+
+## 1.1 Purpose
+
+The purpose of DocFlow is to provide users with a fast, secure, and user-friendly web application for compressing PDF documents while maintaining the highest possible quality.
+
+The platform will initially focus on PDF compression and government document size optimization. In future versions, it will expand into a complete document processing platform that includes PDF editing, document conversion, OCR, AI-powered document analysis, digital signatures, and collaboration features.
+
+---
+
+## 1.2 Problem Statement
+
+Many users face difficulties when uploading PDF documents because online portals require strict file-size limits.
+
+Existing solutions often:
+
+- Reduce document quality excessively.
+- Lack exact target-size compression.
+- Do not provide presets for government documents.
+- Require multiple websites for different PDF tasks.
+- Raise privacy concerns regarding uploaded documents.
+
+DocFlow aims to solve these problems through a single, easy-to-use platform.
+
+---
+
+## 1.3 Project Vision
+
+To become a complete document processing platform that provides reliable, secure, intelligent, and accessible tools for individuals, students, professionals, businesses, and organizations.
+
+---
+
+## 1.4 Project Objectives
+
+The initial version of DocFlow shall:
+
+- Allow users to upload PDF files.
+- Compress PDF documents using multiple compression levels.
+- Compress PDFs to user-defined target sizes.
+- Provide presets for common government document requirements.
+- Display compression statistics.
+- Allow users to download compressed documents.
+- Automatically remove uploaded files after processing.
+
+---
+
+## 1.5 Scope
+
+### Included in Version 1
+
+- PDF Upload
+- Drag and Drop Upload
+- Light Compression
+- Medium Compression
+- Heavy Compression
+- Extreme Compression
+- Target Size Compression
+- Government Presets
+- Download Compressed PDF
+- Responsive User Interface
+
+### Not Included in Version 1
+
+- User Accounts
+- Payments
+- OCR
+- AI Features
+- PDF Merge
+- PDF Split
+- PDF Conversion
+- API Access
+
+These features will be considered for future versions.
+
+---
+
+## 1.6 Target Users
+
+The primary users include:
+
+- Students
+- Job Seekers
+- Government Portal Applicants
+- Businesses
+- General Internet Users

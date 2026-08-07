@@ -1,0 +1,121 @@
+# 5. System Architecture
+
+## 5.1 Overview
+
+DocFlow follows a modern web application architecture.
+
+The system consists of four major components:
+
+1. Frontend
+2. Backend
+3. PDF Processing Engine
+4. Temporary File Storage
+
+The frontend communicates with the backend through HTTP requests. The backend validates uploaded files, performs compression, and returns the processed document to the user.
+
+---
+
+## 5.2 High-Level Architecture
+
+User
+   │
+   ▼
+Frontend (Next.js)
+   │
+   ▼
+Backend API
+   │
+   ▼
+PDF Compression Engine
+   │
+   ▼
+Temporary Storage
+   │
+   ▼
+Compressed PDF
+   │
+   ▼
+Frontend
+   │
+   ▼
+Download
+
+---
+
+## 5.3 Frontend Responsibilities
+
+The frontend is responsible for:
+
+- Displaying the user interface
+- Uploading PDF files
+- Showing progress indicators
+- Displaying compression results
+- Providing download links
+- Displaying error messages
+
+---
+
+## 5.4 Backend Responsibilities
+
+The backend is responsible for:
+
+- Receiving uploaded files
+- Validating file type
+- Validating file size
+- Compressing PDF documents
+- Creating download responses
+- Logging errors
+- Removing temporary files
+
+---
+
+## 5.5 PDF Compression Engine
+
+The compression engine is responsible for:
+
+- Reading uploaded PDFs
+- Applying selected compression settings
+- Creating optimized PDFs
+- Returning processed files
+
+---
+
+## 5.6 Temporary Storage
+
+Uploaded files are stored temporarily during processing.
+
+After successful download or after the configured retention period, temporary files are automatically deleted.
+
+No permanent storage is required for Version 1.
+
+---
+
+## 5.7 Security Considerations
+
+Version 1 will include:
+
+- File type validation
+- File size validation
+- Temporary file deletion
+- HTTPS deployment
+- Basic server-side validation
+
+Future versions may include:
+
+- User authentication
+- Virus scanning
+- Encryption
+- Activity logging
+
+---
+
+## 5.8 Scalability
+
+The architecture should allow future expansion including:
+
+- OCR
+- AI Features
+- User Accounts
+- Batch Processing
+- API Access
+- Team Collaboration

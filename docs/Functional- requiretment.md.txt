@@ -1,0 +1,216 @@
+# 3. Functional Requirements
+
+## Document Information
+
+**Module:** PDF Compression (MVP)
+
+**Version:** 1.0
+
+---
+
+## FR-001: Upload PDF
+
+**Priority:** High
+
+**Description:**
+The system shall allow users to upload PDF files through file selection or drag-and-drop.
+
+**Acceptance Criteria:**
+
+- User can select a PDF from the device.
+- User can drag and drop a PDF.
+- Only PDF files are accepted.
+- Invalid file types display an error message.
+
+---
+
+## FR-002: File Validation
+
+**Priority:** High
+
+**Description:**
+The system shall validate uploaded files before processing.
+
+**Acceptance Criteria:**
+
+- File must have a .pdf extension.
+- File must not exceed the maximum upload size.
+- Corrupted files are rejected.
+- Empty files are rejected.
+
+---
+
+## FR-003: Compression Modes
+
+**Priority:** High
+
+**Description:**
+The system shall provide multiple compression levels.
+
+**Acceptance Criteria:**
+
+Users can select:
+
+- Light
+- Medium
+- Heavy
+- Extreme
+
+---
+
+## FR-004: Target Size Compression
+
+**Priority:** High
+
+**Description:**
+The system shall allow users to compress a PDF to a desired file size.
+
+**Acceptance Criteria:**
+
+Supported preset targets include:
+
+- 50 KB
+- 100 KB
+- 150 KB
+- 200 KB
+- 300 KB
+- 500 KB
+- 1 MB
+
+Users may also enter a custom target size.
+
+---
+
+## FR-005: Government Presets
+
+**Priority:** High
+
+**Description:**
+The system shall provide predefined compression presets.
+
+**Acceptance Criteria:**
+
+Supported presets:
+
+- Aadhaar
+- PAN Card
+- Passport
+- Voter ID
+- Driving Licence
+- Resume
+- Marksheet
+- Birth Certificate
+- Income Certificate
+- Caste Certificate
+
+Each preset should automatically apply an appropriate target size and compression settings.
+
+---
+
+## FR-006: Compression Process
+
+**Priority:** High
+
+**Description:**
+The system shall compress the uploaded PDF according to the selected mode.
+
+**Acceptance Criteria:**
+
+- Processing begins after user confirmation.
+- User receives progress feedback.
+- Compression completes successfully or returns a meaningful error.
+
+---
+
+## FR-007: Progress Indicator
+
+**Priority:** Medium
+
+**Description:**
+The system shall display processing progress.
+
+**Acceptance Criteria:**
+
+- Upload progress is displayed.
+- Compression progress is displayed.
+- Completion status is shown.
+
+---
+
+## FR-008: Compression Results
+
+**Priority:** High
+
+**Description:**
+The system shall display compression results after processing.
+
+**Acceptance Criteria:**
+
+Display:
+
+- Original file size
+- Compressed file size
+- Percentage reduction
+- Compression mode used
+
+---
+
+## FR-009: Download
+
+**Priority:** High
+
+**Description:**
+The system shall allow users to download the compressed PDF.
+
+**Acceptance Criteria:**
+
+- Download button is available after successful processing.
+- Downloaded PDF opens correctly.
+
+---
+
+## FR-010: Temporary File Cleanup
+
+**Priority:** High
+
+**Description:**
+The system shall automatically remove uploaded and processed files after a configurable retention period.
+
+**Acceptance Criteria:**
+
+- Files are deleted automatically.
+- Users are informed that temporary files are removed for privacy.
+
+---
+
+## FR-011: Error Handling
+
+**Priority:** High
+
+**Description:**
+The system shall display clear error messages.
+
+**Acceptance Criteria:**
+
+Examples include:
+
+- Invalid file format
+- Upload failed
+- File too large
+- Compression failed
+- Server unavailable
+
+---
+
+## FR-012: Mobile Compatibility
+
+**Priority:** Medium
+
+**Description:**
+The application shall function correctly on desktop, tablet, and mobile devices.
+
+**Acceptance Criteria:**
+
+- Responsive layout
+- Touch-friendly controls
+- Mobile upload support
