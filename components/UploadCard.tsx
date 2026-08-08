@@ -110,7 +110,11 @@ export default function UploadCard() {
     setError(null);
 
     try {
-      const compressionResult = await compressPDF(selectedFile, compressionMode);
+      const compressionResult = await compressPDF(
+        selectedFile,
+        compressionMode,
+        compressionMode === "custom" ? Number(customSize) : undefined,
+      );
 
       setResult(compressionResult);
 

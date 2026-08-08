@@ -1,5 +1,9 @@
 import { PDFDocument } from "pdf-lib";
-import { rasterizePDF } from "./rasterize";
+import {
+  rasterizePDF,
+  rasterizePDFWithSettings,
+  type RasterSettings,
+} from "./rasterize";
 
 /** Supported compression presets. */
 export type CompressionMode = "light" | "heavy" | "custom";
@@ -15,9 +19,86 @@ export interface CompressionResult {
   mode: CompressionMode;
 }
 
+const CUSTOM_MIN_SCALE = 0.75;
+const CUSTOM_MAX_SCALE = 2.0;
+const CUSTOM_MIN_QUALITY = 0.45;
+const CUSTOM_MAX_QUALITY = 0.92;
+const CUSTOM_BINARY_SEARCH_ATTEMPTS = 5;
+
+function getCustomSettings(level: number): RasterSettings {
+  return {
+    scale: CUSTOM_MIN_SCALE + (CUSTOM_MAX_SCALE - CUSTOM_MIN_SCALE) * level,
+    quality:
+      CUSTOM_MIN_QUALITY +
+      (CUSTOM_MAX_QUALITY - CUSTOM_MIN_QUALITY) * level,
+  };
+}
+
+async function compressToCustomTarget(
+  file: File,
+  originalBytes: Uint8Array,
+  originalSize: number,
+  targetBytes: number,
+): Promise<Uint8Array> {
+  let bestWithinTarget: Uint8Array | undefined;
+  let smallestPractical: Uint8Array | undefined;
+
+  const measureCandidate = async (level: number) => {
+    const bytes = await rasterizePDFWithSettings(
+      file,
+      getCustomSettings(level),
+      true,
+    );
+    const size = bytes.length;
+
+    if (size < originalSize) {
+      if (size <= targetBytes) {
+        if (!bestWithinTarget || size > bestWithinTarget.length) {
+          bestWithinTarget = bytes;
+        }
+      } else if (
+        !bestWithinTarget &&
+        (!smallestPractical || size < smallestPractical.length)
+      ) {
+        smallestPractical = bytes;
+      }
+    }
+
+    return size;
+  };
+
+  const highestQualitySize = await measureCandidate(1);
+
+  if (highestQualitySize <= targetBytes && bestWithinTarget) {
+    return bestWithinTarget;
+  }
+
+  const lowestPracticalSize = await measureCandidate(0);
+
+  if (lowestPracticalSize <= targetBytes) {
+    smallestPractical = undefined;
+    let lowerLevel = 0;
+    let upperLevel = 1;
+
+    for (let attempt = 0; attempt < CUSTOM_BINARY_SEARCH_ATTEMPTS; attempt++) {
+      const level = (lowerLevel + upperLevel) / 2;
+      const size = await measureCandidate(level);
+
+      if (size <= targetBytes) {
+        lowerLevel = level;
+      } else {
+        upperLevel = level;
+      }
+    }
+  }
+
+  return bestWithinTarget ?? smallestPractical ?? originalBytes;
+}
+
 export async function compressPDF(
   file: File,
   mode: CompressionMode,
+  customTargetSizeMb?: number,
 ): Promise<CompressionResult> {
   const startTime = performance.now();
 
@@ -50,15 +131,29 @@ export async function compressPDF(
       savedPdfBytes = new Uint8Array(originalPdfBytes);
     }
   } else {
-    /*
-     * Custom compression is not implemented yet.
-     * For now, use the normal pdf-lib load/save pipeline.
-     */
-    const pdfBytes = await file.arrayBuffer();
-    const pdfDoc = await PDFDocument.load(pdfBytes);
+    if (
+      !Number.isFinite(customTargetSizeMb) ||
+      customTargetSizeMb === undefined ||
+      customTargetSizeMb <= 0
+    ) {
+      throw new Error("A positive custom target size is required.");
+    }
 
-    savedPdfBytes = await pdfDoc.save();
-    pageCount = pdfDoc.getPageCount();
+    const originalPdfBytes = await file.arrayBuffer();
+    const originalPdf = await PDFDocument.load(originalPdfBytes);
+    const originalBytes = new Uint8Array(originalPdfBytes);
+    const targetBytes = customTargetSizeMb * 1024 * 1024;
+
+    pageCount = originalPdf.getPageCount();
+    savedPdfBytes =
+      originalSize <= targetBytes
+        ? originalBytes
+        : await compressToCustomTarget(
+            file,
+            originalBytes,
+            originalSize,
+            targetBytes,
+          );
   }
 
   const processedSize = savedPdfBytes.length;
