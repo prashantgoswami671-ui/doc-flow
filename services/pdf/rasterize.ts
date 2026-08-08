@@ -11,8 +11,9 @@ function getSettings(mode: RasterCompressionMode) {
   }
 
   return {
-    scale: 1.4,
-    quality: 0.75,
+    // Keep more detail than Heavy while avoiding the previous upscaling.
+    scale: 2.0,
+    quality: 0.92,
   };
 }
 

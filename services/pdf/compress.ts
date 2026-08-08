@@ -41,6 +41,14 @@ export async function compressPDF(
     const originalPdf = await PDFDocument.load(originalPdfBytes);
 
     pageCount = originalPdf.getPageCount();
+
+    if (
+      mode === "light" &&
+      (savedPdfBytes.length >= originalSize ||
+        savedPdfBytes.length < originalSize * 0.6)
+    ) {
+      savedPdfBytes = new Uint8Array(originalPdfBytes);
+    }
   } else {
     /*
      * Custom compression is not implemented yet.
