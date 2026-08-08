@@ -4,7 +4,10 @@ import { useRef, useState } from "react";
 import {
   compressPDF,
   type CompressionMode,
+  type CompressionResult,
 } from "../services/pdf/compress";
+
+import ResultCard from "./ResultCard";
 
 const compressionOptions: { id: CompressionMode; label: string }[] = [
   { id: "light", label: "Light Compression" },
@@ -52,6 +55,7 @@ export default function UploadCard() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [result, setResult] = useState<CompressionResult | null>(null);
 
   /** Validates and stores the chosen file, or shows an error. */
   const handleFileSelection = (file: File | undefined) => {
@@ -66,6 +70,7 @@ export default function UploadCard() {
     setSelectedFile(file);
     setError(null);
     setSuccessMessage(null);
+    setResult(null);
   };
 
   /** Opens the hidden file picker when the drop zone is clicked. */
@@ -88,26 +93,39 @@ export default function UploadCard() {
   };
 
   const fileSize = selectedFile ? formatFileSize(selectedFile.size) : null;
-  const canCompress = selectedFile !== null && !isProcessing;
+
+  const isCustomSizeInvalid =
+    compressionMode === "custom" &&
+    (customSize.trim() === "" || Number(customSize) <= 0);
+
+  const canCompress =
+    selectedFile !== null && !isProcessing && !isCustomSizeInvalid;
 
   /** Delegates compression to the pdf service and surfaces success or failure. */
   const handleCompressPdf = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile || isCustomSizeInvalid) return;
 
     setIsProcessing(true);
     setSuccessMessage(null);
     setError(null);
 
     try {
-      const compressedBytes = await compressPDF(selectedFile, compressionMode);
+      const compressionResult = await compressPDF(selectedFile, compressionMode);
 
-      downloadPdfBytes(compressedBytes, "compressed.pdf");
-      setSuccessMessage("PDF compressed and downloaded as compressed.pdf.");
-    } catch {
-      setError(
-        "Failed to compress the PDF. The file may be corrupted or password-protected.",
-      );
-    } finally {
+      setResult(compressionResult);
+
+      downloadPdfBytes(compressionResult.bytes, "compressed.pdf");
+
+      setSuccessMessage("PDF processed and downloaded successfully.");
+    } catch (error) {
+  console.error("PDF compression error:", error);
+
+  setError(
+    error instanceof Error
+      ? `Compression failed: ${error.message}`
+      : "Failed to compress the PDF.",
+  );
+} finally {
       setIsProcessing(false);
     }
   };
@@ -239,13 +257,30 @@ export default function UploadCard() {
 
           <button
             type="button"
-            disabled={!canCompress}
             onClick={handleCompressPdf}
-            className="mt-6 w-full rounded-lg bg-blue-600 px-6 py-3 text-sm sm:text-base font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-600"
+            disabled={!canCompress}
+            className={`mt-6 w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
+              canCompress
+                ? "bg-blue-600 text-white hover:bg-blue-700"
+                : "bg-gray-200 text-gray-400 cursor-not-allowed"
+            }`}
           >
-            Compress PDF
+            {isProcessing ? "Compressing…" : "Compress PDF"}
           </button>
         </div>
+
+        {result && (
+          <ResultCard
+            fileName={selectedFile?.name ?? "Unknown.pdf"}
+            pageCount={result.pageCount}
+            originalSize={result.originalSize}
+            processedSize={result.processedSize}
+            reduction={result.reductionPercent}
+            processingTime={result.processingTime}
+            mode={result.mode}
+            onDownload={() => downloadPdfBytes(result.bytes, "compressed.pdf")}
+          />
+        )}
       </div>
     </div>
   );
