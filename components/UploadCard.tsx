@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { analyzePDF, type PdfAnalysis } from "../services/analyze";
 import {
   compressPDF,
   type CompressionMode,
@@ -29,6 +30,13 @@ function formatFileSize(bytes: number) {
   return { kb, mb };
 }
 
+/** Maps compressibility values to user-facing labels. */
+function formatCompressibilityLabel(
+  value: PdfAnalysis["estimatedCompressibility"],
+): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 /** Builds a download filename from the original PDF name (e.g. report.pdf → report-compressed.pdf). */
 function getCompressedFilename(originalName: string): string {
   if (originalName.toLowerCase().endsWith(".pdf")) {
@@ -54,6 +62,7 @@ function downloadPdfBytes(bytes: Uint8Array, filename: string): void {
 export default function UploadCard() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isProcessingRef = useRef(false);
+  const analysisRequestIdRef = useRef(0);
 
   const [compressionMode, setCompressionMode] =
     useState<CompressionMode>("light");
@@ -66,14 +75,56 @@ export default function UploadCard() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [result, setResult] = useState<CompressionResult | null>(null);
+  const [analysis, setAnalysis] = useState<PdfAnalysis | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+  /** Runs PDF analysis and ignores stale results from earlier selections. */
+  const startAnalysis = async (file: File) => {
+    const requestId = ++analysisRequestIdRef.current;
+
+    setAnalysis(null);
+    setAnalysisError(null);
+    setIsAnalyzing(true);
+
+    try {
+      const analysisResult = await analyzePDF(file);
+
+      if (requestId !== analysisRequestIdRef.current) {
+        return;
+      }
+
+      setAnalysis(analysisResult);
+    } catch (analysisFailure) {
+      console.error("PDF analysis error:", analysisFailure);
+
+      if (requestId !== analysisRequestIdRef.current) {
+        return;
+      }
+
+      setAnalysisError(
+        analysisFailure instanceof Error
+          ? `Analysis unavailable: ${analysisFailure.message}`
+          : "Analysis unavailable for this PDF.",
+      );
+    } finally {
+      if (requestId === analysisRequestIdRef.current) {
+        setIsAnalyzing(false);
+      }
+    }
+  };
 
   /** Validates and stores the chosen file, or shows an error. */
   const handleFileSelection = (file: File | undefined) => {
     if (!file) return;
 
     if (!isPdfFile(file)) {
+      analysisRequestIdRef.current += 1;
       setSelectedFile(null);
       setError("Please select a valid PDF file.");
+      setAnalysis(null);
+      setAnalysisError(null);
+      setIsAnalyzing(false);
       return;
     }
 
@@ -81,14 +132,19 @@ export default function UploadCard() {
     setError(null);
     setSuccessMessage(null);
     setResult(null);
+    void startAnalysis(file);
   };
 
   /** Clears result state so the user can compress another PDF. */
   const handleCompressAnother = () => {
+    analysisRequestIdRef.current += 1;
     setResult(null);
     setSelectedFile(null);
     setSuccessMessage(null);
     setError(null);
+    setAnalysis(null);
+    setAnalysisError(null);
+    setIsAnalyzing(false);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -238,6 +294,49 @@ export default function UploadCard() {
                 <p className="mt-1 text-sm text-gray-500">
                   {fileSize.kb} KB · {fileSize.mb} MB
                 </p>
+              </div>
+            )}
+
+            {selectedFile && isAnalyzing && (
+              <p className="mt-3 text-sm font-medium text-gray-500">
+                Analyzing PDF...
+              </p>
+            )}
+
+            {selectedFile && analysisError && (
+              <p className="mt-3 text-sm font-medium text-amber-600">
+                {analysisError}
+              </p>
+            )}
+
+            {selectedFile && analysis && (
+              <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                <p className="text-sm font-medium text-gray-700">PDF Analysis</p>
+
+                <div className="mt-3 grid grid-cols-3 gap-3">
+                  <div>
+                    <p className="text-xs text-gray-500">Pages</p>
+                    <p className="mt-0.5 text-sm font-semibold text-gray-800">
+                      {analysis.pageCount}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-gray-500">Images found</p>
+                    <p className="mt-0.5 text-sm font-semibold text-gray-800">
+                      {analysis.imageCount}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-gray-500">Compression potential</p>
+                    <p className="mt-0.5 text-sm font-semibold text-gray-800">
+                      {formatCompressibilityLabel(
+                        analysis.estimatedCompressibility,
+                      )}
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
           </div>
