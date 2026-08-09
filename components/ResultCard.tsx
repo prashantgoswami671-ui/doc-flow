@@ -7,6 +7,20 @@ interface ResultCardProps {
   processingTime: number;
   mode: string;
   onDownload: () => void;
+  onCompressAnother: () => void;
+}
+
+function formatModeLabel(mode: string): string {
+  switch (mode) {
+    case "light":
+      return "Light Compression";
+    case "heavy":
+      return "Heavy Compression";
+    case "custom":
+      return "Custom Compression";
+    default:
+      return mode;
+  }
 }
 
 function formatSize(size: number) {
@@ -24,6 +38,7 @@ export default function ResultCard({
   processingTime,
   mode,
   onDownload,
+  onCompressAnother,
 }: ResultCardProps) {
   return (
     <div className="mt-8 w-full max-w-2xl rounded-2xl border border-gray-200 bg-white p-8 shadow-lg">
@@ -71,7 +86,7 @@ export default function ResultCard({
           value={`${processingTime.toFixed(2)} sec`}
         />
 
-        <Stat title="⚙️ Mode" value={mode} />
+        <Stat title="⚙️ Mode" value={formatModeLabel(mode)} />
       </div>
 
       {/* Download Button */}
@@ -79,7 +94,15 @@ export default function ResultCard({
         onClick={onDownload}
         className="mt-8 w-full rounded-xl bg-blue-600 py-3 text-lg font-semibold text-white transition hover:bg-blue-700"
       >
-        ⬇ Download PDF
+        Download PDF Again
+      </button>
+
+      <button
+        type="button"
+        onClick={onCompressAnother}
+        className="mt-3 w-full rounded-xl border border-gray-300 bg-white py-3 text-lg font-semibold text-gray-700 transition hover:bg-gray-50"
+      >
+        Compress another PDF
       </button>
     </div>
   );

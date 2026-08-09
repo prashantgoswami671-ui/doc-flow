@@ -29,6 +29,15 @@ function formatFileSize(bytes: number) {
   return { kb, mb };
 }
 
+/** Builds a download filename from the original PDF name (e.g. report.pdf → report-compressed.pdf). */
+function getCompressedFilename(originalName: string): string {
+  if (originalName.toLowerCase().endsWith(".pdf")) {
+    return `${originalName.slice(0, -4)}-compressed.pdf`;
+  }
+
+  return `${originalName}-compressed.pdf`;
+}
+
 /** Triggers a browser download for PDF bytes and cleans up the object URL. */
 function downloadPdfBytes(bytes: Uint8Array, filename: string): void {
   const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
@@ -72,6 +81,18 @@ export default function UploadCard() {
     setError(null);
     setSuccessMessage(null);
     setResult(null);
+  };
+
+  /** Clears result state so the user can compress another PDF. */
+  const handleCompressAnother = () => {
+    setResult(null);
+    setSelectedFile(null);
+    setSuccessMessage(null);
+    setError(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   };
 
   /** Opens the hidden file picker when the drop zone is clicked. */
@@ -120,7 +141,10 @@ export default function UploadCard() {
 
       setResult(compressionResult);
 
-      downloadPdfBytes(compressionResult.bytes, "compressed.pdf");
+      downloadPdfBytes(
+        compressionResult.bytes,
+        getCompressedFilename(selectedFile.name),
+      );
 
       setSuccessMessage("PDF processed and downloaded successfully.");
     } catch (error) {
@@ -287,7 +311,13 @@ export default function UploadCard() {
             reduction={result.reductionPercent}
             processingTime={result.processingTime}
             mode={result.mode}
-            onDownload={() => downloadPdfBytes(result.bytes, "compressed.pdf")}
+            onDownload={() =>
+              downloadPdfBytes(
+                result.bytes,
+                getCompressedFilename(selectedFile?.name ?? "Unknown.pdf"),
+              )
+            }
+            onCompressAnother={handleCompressAnother}
           />
         )}
       </div>
