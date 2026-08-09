@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DocFlow Orientation Detection Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        .test-section { margin: 20px 0; padding: 15px; background: #f9f9f9; border-left: 4px solid #007bff; }
+        .test-header { font-weight: bold; color: #333; margin-bottom: 10px; }
+        .result { margin: 10px 0; padding: 10px; background: white; border-radius: 4px; border: 1px solid #ddd; }
+        .status { display: inline-block; padding: 4px 8px; border-radius: 3px; font-weight: bold; color: white; }
+        .status-pass { background: #28a745; }
+        .status-fail { background: #dc3545; }
+        .status-pending { background: #ffc107; color: black; }
+        table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f0f0f0; font-weight: bold; }
+        .page-row-normal { background: #e8f5e9; }
+        .page-row-rotated { background: #fff3e0; }
+        .page-row-needs-review { background: #e3f2fd; }
+        .instructions { background: #e7f3ff; border: 1px solid #007bff; padding: 15px; border-radius: 4px; margin: 15px 0; }
+        code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 DocFlow PDF Orientation Detection Test</h1>
+        
+        <div class="instructions">
+            <strong>Test Instructions:</strong>
+            <ol>
+                <li>Upload the test PDF: <code>test-pdf-orientation.pdf</code></li>
+                <li>Navigate to the "Fix Page Orientation" feature</li>
+                <li>Review the detected orientations below</li>
+                <li>Expected results:
+                    <ul>
+                        <li><strong>Page 4:</strong> Likely misaligned (sideways/90°-270°)</li>
+                        <li><strong>Page 9:</strong> Likely rotated 180° (upside down) ← NEW DETECTION</li>
+                        <li><strong>Page 15:</strong> Likely misaligned (sideways/90°-270°)</li>
+                        <li><strong>Other pages:</strong> Normal or needs review</li>
+                    </ul>
+                </li>
+            </ol>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header">✅ Implementation Status</div>
+            <div class="result">
+                <strong>180° Rotation Detection:</strong>
+                <span class="status status-pass">✓ IMPLEMENTED</span>
+                <p>The orientation detector now includes pixel-content analysis for image-only pages to detect 180° rotation.</p>
+            </div>
+            <div class="result">
+                <strong>Detection Method:</strong>
+                <ul>
+                    <li>✓ Page rendering to canvas</li>
+                    <li>✓ Vertical content distribution analysis</li>
+                    <li>✓ Luminance-based pixel classification</li>
+                    <li>✓ Confidence threshold (≥0.25)</li>
+                    <li>✓ Conservative detection (bottom_ratio &gt; top_ratio + 0.3)</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header">📊 Expected Test Results</div>
+            <table>
+                <tr>
+                    <th>Page Number</th>
+                    <th>Detected Orientation</th>
+                    <th>Proposed Correction</th>
+                    <th>Status</th>
+                    <th>Notes</th>
+                </tr>
+                <tr class="page-row-rotated">
+                    <td><strong>4</strong></td>
+                    <td>90° or 270° (landscape outlier)</td>
+                    <td>90° or 270°</td>
+                    <td><span class="status status-pass">likely-misaligned</span></td>
+                    <td>Image-only page detected as sideways based on aspect ratio</td>
+                </tr>
+                <tr class="page-row-rotated">
+                    <td><strong>9</strong></td>
+                    <td>180°</td>
+                    <td>180°</td>
+                    <td><span class="status status-pass">likely-rotated</span></td>
+                    <td>✨ NEW: Pixel content analysis detects upside-down page</td>
+                </tr>
+                <tr class="page-row-rotated">
+                    <td><strong>15</strong></td>
+                    <td>90° or 270° (landscape outlier)</td>
+                    <td>90° or 270°</td>
+                    <td><span class="status status-pass">likely-misaligned</span></td>
+                    <td>Image-only page detected as sideways based on aspect ratio</td>
+                </tr>
+                <tr class="page-row-normal">
+                    <td><strong>Other</strong></td>
+                    <td>0° (normal)</td>
+                    <td>None</td>
+                    <td><span class="status status-pass">normal</span></td>
+                    <td>Correctly oriented pages</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header">🔬 Technical Details</div>
+            <div class="result">
+                <strong>Algorithm for 180° Detection:</strong>
+                <ol>
+                    <li>Render page to canvas at 1.5x scale (optimized for large pages)</li>
+                    <li>Extract pixel data using <code>getImageData()</code></li>
+                    <li>For each pixel, calculate luminance: <code>0.299*R + 0.587*G + 0.114*B</code></li>
+                    <li>Count "dark" pixels (luminance &lt; 200) in three sections:
+                        <ul>
+                            <li>Top third (rows 0 to height/3)</li>
+                            <li>Middle third (rows height/3 to 2*height/3)</li>
+                            <li>Bottom third (rows 2*height/3 to height)</li>
+                        </ul>
+                    </li>
+                    <li>Calculate ratios: <code>topRatio = top / total</code>, <code>bottomRatio = bottom / total</code></li>
+                    <li>Detect 180° rotation if: <code>bottomRatio &gt; topRatio + 0.3</code></li>
+                    <li>Confidence = <code>|bottomRatio - topRatio|</code> (capped at 1.0)</li>
+                    <li>Only report if confidence ≥ 0.25</li>
+                </ol>
+            </div>
+            <div class="result">
+                <strong>Why This Approach:</strong>
+                <ul>
+                    <li>✓ <strong>No new dependencies:</strong> Uses browser Canvas API and existing PDF.js</li>
+                    <li>✓ <strong>Lightweight:</strong> Renders at reduced scale for performance</li>
+                    <li>✓ <strong>Conservative:</strong> 30% threshold avoids false positives</li>
+                    <li>✓ <strong>Content-based:</strong> Analyzes actual page content, not metadata</li>
+                    <li>✓ <strong>Scalable:</strong> Works for any image-only document</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header">⚙️ Configuration</div>
+            <div class="result">
+                <strong>Constants Used:</strong>
+                <pre>MIN_ALPHANUMERIC_CHARACTERS = 80
+MIN_TEXT_ITEMS = 8
+MIN_IMAGE_ASPECT_RATIO = 1.15
+MIN_RASTER_PAGES_FOR_DOMINANCE = 3
+MIN_DOMINANT_RASTER_RATIO = 0.8
+
+180° Detection Parameters:
+- Canvas scale: 1.5x (adaptive for large pages)
+- Rotation threshold: bottomRatio &gt; topRatio + 0.3
+- Confidence threshold: ≥ 0.25
+- Minimum content pixels: 100</pre>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header">✨ Key Features Preserved</div>
+            <ul>
+                <li>✓ Text-based orientation detection (90°, 180°, 270°)</li>
+                <li>✓ /Rotate metadata detection for explicitly rotated pages</li>
+                <li>✓ Image aspect ratio outlier detection (90°/270°)</li>
+                <li>✓ Confidence scoring and thresholds</li>
+                <li>✓ Review-first model (user must confirm before applying)</li>
+                <li>✓ Per-page rotation without page count changes</li>
+                <li>✓ All compression, extraction, and unrelated features</li>
+            </ul>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header">🚀 Next Steps</div>
+            <ol>
+                <li>Upload <code>test-pdf-orientation.pdf</code> via the UI</li>
+                <li>Navigate to "Fix Page Orientation" section</li>
+                <li>Verify that page 9 is detected as "likely rotated 180°"</li>
+                <li>Verify that pages 4 and 15 are detected as "likely misaligned"</li>
+                <li>Review the proposed corrections</li>
+                <li>Select pages to fix and apply the correction</li>
+                <li>Verify the fixed PDF has correct orientations</li>
+            </ol>
+        </div>
+    </div>
+</body>
+</html>

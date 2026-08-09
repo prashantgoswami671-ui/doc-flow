@@ -1,6 +1,7 @@
 import Navbar from "../components/Navbar";
 import Hero from "../components/Hero";
 import ExtractPagesCard from "../components/ExtractPagesCard";
+import FixPageOrientationCard from "../components/FixPageOrientationCard";
 import UploadCard from "../components/UploadCard";
 
 export default function Home() {
@@ -13,6 +14,9 @@ export default function Home() {
       </section>
       <section className="pb-20">
         <ExtractPagesCard />
+      </section>
+      <section className="pb-20">
+        <FixPageOrientationCard />
       </section>
     </>
   );
