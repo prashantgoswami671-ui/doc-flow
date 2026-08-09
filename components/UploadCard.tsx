@@ -44,6 +44,7 @@ function downloadPdfBytes(bytes: Uint8Array, filename: string): void {
 
 export default function UploadCard() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isProcessingRef = useRef(false);
 
   const [compressionMode, setCompressionMode] =
     useState<CompressionMode>("light");
@@ -103,8 +104,9 @@ export default function UploadCard() {
 
   /** Delegates compression to the pdf service and surfaces success or failure. */
   const handleCompressPdf = async () => {
-    if (!selectedFile || isCustomSizeInvalid) return;
+    if (isProcessingRef.current || !selectedFile || isCustomSizeInvalid) return;
 
+    isProcessingRef.current = true;
     setIsProcessing(true);
     setSuccessMessage(null);
     setError(null);
@@ -130,6 +132,7 @@ export default function UploadCard() {
       : "Failed to compress the PDF.",
   );
 } finally {
+      isProcessingRef.current = false;
       setIsProcessing(false);
     }
   };
@@ -227,6 +230,7 @@ export default function UploadCard() {
                 key={option.id}
                 type="button"
                 onClick={() => setCompressionMode(option.id)}
+                disabled={isProcessing}
                 className={`rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
                   compressionMode === option.id
                     ? "border-blue-600 bg-blue-600 text-white shadow-sm"
@@ -254,6 +258,7 @@ export default function UploadCard() {
                 placeholder="e.g. 5"
                 value={customSize}
                 onChange={(e) => setCustomSize(e.target.value)}
+                disabled={isProcessing}
                 className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               />
             </div>
@@ -269,7 +274,7 @@ export default function UploadCard() {
                 : "bg-gray-200 text-gray-400 cursor-not-allowed"
             }`}
           >
-            {isProcessing ? "Compressing…" : "Compress PDF"}
+            {isProcessing ? "Processing PDF..." : "Compress PDF"}
           </button>
         </div>
 
