@@ -5,6 +5,7 @@ import OrganizePagesCard from "../components/OrganizePagesCard";
 import FixPageOrientationCard from "../components/FixPageOrientationCard";
 import MergePdfCard from "../components/MergePdfCard";
 import SplitPdfCard from "../components/SplitPdfCard";
+import InsertPagesCard from "../components/InsertPagesCard";
 import UploadCard from "../components/UploadCard";
 
 export default function Home() {
@@ -26,6 +27,9 @@ export default function Home() {
       </section>
       <section className="pb-20">
         <SplitPdfCard />
+      </section>
+      <section className="pb-20">
+        <InsertPagesCard />
       </section>
       <section className="pb-20">
         <FixPageOrientationCard />
