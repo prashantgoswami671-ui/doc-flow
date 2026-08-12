@@ -8,6 +8,8 @@ import SplitPdfCard from "../components/SplitPdfCard";
 import InsertPagesCard from "../components/InsertPagesCard";
 import MetadataEditorCard from "../components/MetadataEditorCard";
 import WatermarkPdfCard from "../components/WatermarkPdfCard";
+import ProtectPdfCard from "../components/ProtectPdfCard";
+import UnlockPdfCard from "../components/UnlockPdfCard";
 import UploadCard from "../components/UploadCard";
 
 export default function Home() {
@@ -41,6 +43,12 @@ export default function Home() {
       </section>
       <section className="pb-20">
         <WatermarkPdfCard />
+      </section>
+      <section className="pb-20">
+        <ProtectPdfCard />
+      </section>
+      <section className="pb-20">
+        <UnlockPdfCard />
       </section>
     </>
   );
