@@ -5,6 +5,7 @@ import OrganizePagesCard from "../components/OrganizePagesCard";
 import FixPageOrientationCard from "../components/FixPageOrientationCard";
 import MergePdfCard from "../components/MergePdfCard";
 import ImageToPdfCard from "../components/ImageToPdfCard";
+import PdfToImageCard from "../components/PdfToImageCard";
 import SplitPdfCard from "../components/SplitPdfCard";
 import InsertPagesCard from "../components/InsertPagesCard";
 import MetadataEditorCard from "../components/MetadataEditorCard";
@@ -32,6 +33,9 @@ export default function Home() {
       </section>
       <section className="pb-20">
         <ImageToPdfCard />
+      </section>
+      <section className="pb-20">
+        <PdfToImageCard />
       </section>
       <section className="pb-20">
         <SplitPdfCard />
