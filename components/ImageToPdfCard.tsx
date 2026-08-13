@@ -245,15 +245,6 @@ export default function ImageToPdfCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterPreset, queuedImageIdsKey]);
 
-  // Keep the lightbox index valid: if the previewed image is removed (or
-  // the queue is cleared) while the modal is open, close it instead of
-  // pointing at a stale/incorrect index.
-  useEffect(() => {
-    if (previewIndex !== null && !queuedImages[previewIndex]) {
-      setPreviewIndex(null);
-    }
-  }, [previewIndex, queuedImages]);
-
   // Lightbox keyboard support: Escape closes, ArrowLeft/ArrowRight navigate.
   useEffect(() => {
     if (previewIndex === null) return;
@@ -317,6 +308,11 @@ export default function ImageToPdfCard() {
   };
 
   const removeImage = (id: string) => {
+    // Captured before the removal below so we know the removed image's
+    // index in the pre-removal queue, to keep the open lightbox (if any)
+    // pointed at the correct image without a separate effect.
+    const removedIndex = queuedImages.findIndex((entry) => entry.id === id);
+
     setQueuedImages((current) => {
       const target = current.find((entry) => entry.id === id);
 
@@ -329,6 +325,16 @@ export default function ImageToPdfCard() {
 
       return current.filter((entry) => entry.id !== id);
     });
+
+    if (removedIndex !== -1) {
+      setPreviewIndex((current) => {
+        if (current === null) return current;
+        if (removedIndex < current) return current - 1;
+        if (removedIndex === current) return null;
+        return current;
+      });
+    }
+
     resetOutput();
   };
 
