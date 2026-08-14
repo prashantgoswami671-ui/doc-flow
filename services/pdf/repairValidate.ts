@@ -1,433 +1,323 @@
 import { PDFDocument } from "pdf-lib";
-import { rasterizePDFWithSettings } from "./rasterize";
+import {
+  rasterizePDFWithSettings,
+  type RasterSettings,
+} from "./rasterize";
 
-/**
- * Validation result for a PDF document.
- * Reports capabilities of each supported library.
- */
+export type PdfValidationStatus = "valid" | "repairable" | "invalid";
+
+export interface PdfValidationIssue {
+  severity: "info" | "warning" | "error";
+  code: string;
+  message: string;
+}
+
 export interface PdfValidationResult {
-  /** Whether pdf-lib can load the document */
-  pdfLibCanLoad: boolean;
-  /** Whether PDF.js can render the document */
-  pdfJsCanRender: boolean;
-  /** Page count if successfully loaded */
+  status: PdfValidationStatus;
   pageCount: number | null;
-  /** Error message from pdf-lib if load failed */
-  pdfLibError: string | null;
-  /** Error message from PDF.js if render failed */
-  pdfJsError: string | null;
-  /** Whether the PDF is password protected */
-  isPasswordProtected: boolean;
+  fileSize: number;
+  pdfLibLoadable: boolean;
+  pdfJsLoadable: boolean;
+  renderablePages: number;
+  issues: PdfValidationIssue[];
 }
 
-/**
- * Strategy result after each repair attempt.
- */
-export interface RepairStrategyResult {
-  /** Which strategy was attempted */
-  strategy:
-    | "structural-rebuild"
-    | "structural-recovery"
-    | "raster-salvage"
-    | "none";
-  /** Whether the repair succeeded */
-  success: boolean;
-  /** Repaired PDF bytes, if successful */
-  repairedBytes?: Uint8Array;
-  /** Page count of repaired PDF, if successful */
-  repairedPageCount?: number;
-  /** Original page count from source */
-  originalPageCount: number;
-  /** Pages that were recovered (if partial) */
-  recoveredPageCount?: number;
-  /** Pages that failed to recover (if partial) */
-  failedPageNumbers?: number[];
-  /** Error message if repair failed */
-  error?: string;
-  /** Warning about lossy operations */
-  warning?: string;
+export interface RepairPdfOptions {
+  allowRasterFallback?: boolean;
+  forceRasterFallback?: boolean;
 }
 
-/**
- * Complete repair result with validation and strategy information.
- */
-export interface PdfRepairResult {
-  /** Overall success */
-  success: boolean;
-  /** Which repair strategy succeeded (or "none" if all failed) */
-  repairMethod:
-    | "structural-rebuild"
-    | "structural-recovery"
-    | "raster-salvage"
-    | "partial-recovery"
-    | "none";
-  /** Repaired PDF bytes, if successful */
-  repairedBytes?: Uint8Array;
-  /** Original page count */
-  originalPageCount: number;
-  /** Page count after repair, if successful */
-  repairedPageCount?: number;
-  /** Pages recovered in partial repairs */
-  recoveredPageCount?: number;
-  /** Pages that could not be recovered */
-  failedPageNumbers?: number[];
-  /** Validation result before repair */
-  validationResult: PdfValidationResult;
-  /** Validation result after repair (if successful) */
-  postRepairValidation?: PdfValidationResult;
-  /** Warnings to show the user */
-  warnings: string[];
-  /** Error message if all strategies failed */
-  error?: string;
-  /** Processing time in milliseconds */
-  processingTime: number;
+export interface RepairPdfResult {
+  bytes: Uint8Array;
+  method: "direct" | "raster-fallback";
+  originalSize: number;
+  repairedSize: number;
+  pageCount: number;
+  validation: PdfValidationResult;
 }
 
-/**
- * Validates a PDF by testing both pdf-lib and PDF.js capabilities.
- * Does NOT attempt to parse low-level PDF syntax.
- * Returns what each library can and cannot do with the input.
- */
-export async function validatePdf(file: File): Promise<PdfValidationResult> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let pdfLibCanLoad = false;
-  let pdfLibError: string | null = null;
+const VALIDATION_RENDER_SCALE = 0.8;
+const MAX_VALIDATION_RENDER_PAGES = 24;
+const RASTER_FALLBACK_SETTINGS: RasterSettings = {
+  scale: 1.4,
+  quality: 0.9,
+};
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isPasswordError(error: unknown): boolean {
+  const message = getErrorMessage(error);
+
+  return /password|encrypt|needpassword|incorrectpassword/i.test(message);
+}
+
+function buildRepairedFilename(name: string): string {
+  if (name.toLowerCase().endsWith(".pdf")) {
+    return `${name.slice(0, -4)}-repaired.pdf`;
+  }
+
+  return `${name}-repaired.pdf`;
+}
+
+async function validatePdfBytes(
+  bytes: Uint8Array,
+  fileSize: number,
+): Promise<PdfValidationResult> {
+  const issues: PdfValidationIssue[] = [];
   let pageCount: number | null = null;
-  let isPasswordProtected = false;
+  let pdfLibLoadable = false;
+  let pdfJsLoadable = false;
+  let renderablePages = 0;
 
-  // Test pdf-lib
   try {
-    const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true });
-    pdfLibCanLoad = true;
-    pageCount = pdf.getPageCount();
-  } catch (err) {
-    pdfLibCanLoad = false;
-    pdfLibError = err instanceof Error ? err.message : String(err);
+    const loaded = await PDFDocument.load(bytes.buffer.slice(0));
 
-    // Check if it's a password protection error
-    if (/encrypt/i.test(pdfLibError)) {
-      isPasswordProtected = true;
+    pdfLibLoadable = true;
+    pageCount = loaded.getPageCount();
+  } catch (error) {
+    if (isPasswordError(error)) {
+      issues.push({
+        severity: "error",
+        code: "password-protected",
+        message:
+          "This PDF is password protected. Unlock it before validation or repair.",
+      });
+    } else {
+      issues.push({
+        severity: "warning",
+        code: "pdf-lib-load-failed",
+        message:
+          "The document could not be fully parsed for structural checks, but rendering may still work.",
+      });
     }
   }
 
-  // Test PDF.js rendering capability
-  let pdfJsCanRender = false;
-  let pdfJsError: string | null = null;
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+
+  if (typeof window !== "undefined") {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+      "pdfjs-dist/legacy/build/pdf.worker.min.mjs",
+      import.meta.url,
+    ).toString();
+  }
+
+  const loadingTask = pdfjsLib.getDocument({ data: bytes });
+  let pdf: { numPages: number; getPage: (pageNumber: number) => Promise<any>; cleanup: () => void } | null = null;
 
   try {
-    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    pdf = await loadingTask.promise;
+    pdfJsLoadable = true;
+    pageCount = pageCount ?? pdf.numPages;
 
-    if (typeof window !== "undefined") {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-        "pdfjs-dist/legacy/build/pdf.worker.min.mjs",
-        import.meta.url,
-      ).toString();
-    }
+    const pagesToRender = Math.min(pdf.numPages, MAX_VALIDATION_RENDER_PAGES);
 
-    const loadingTask = pdfjsLib.getDocument({ data: bytes });
-    const pdf = await loadingTask.promise;
+    for (let pageNumber = 1; pageNumber <= pagesToRender; pageNumber++) {
+      const page = await pdf.getPage(pageNumber);
+      const canvas = document.createElement("canvas");
 
-    // Try to get first page to verify rendering works
-    if (pdf.numPages > 0) {
-      const page = await pdf.getPage(1);
-      const viewport = page.getViewport({ scale: 1 });
-      // If viewport is valid, rendering should work
-      if (viewport && viewport.width > 0 && viewport.height > 0) {
-        pdfJsCanRender = true;
+      try {
+        const viewport = page.getViewport({ scale: VALIDATION_RENDER_SCALE });
+
+        canvas.width = Math.max(1, Math.ceil(viewport.width));
+        canvas.height = Math.max(1, Math.ceil(viewport.height));
+
+        const context = canvas.getContext("2d");
+
+        if (!context) {
+          throw new Error("Unable to create canvas rendering context.");
+        }
+
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+
+        await page.render({ canvas, canvasContext: context, viewport }).promise;
+        renderablePages += 1;
+      } catch {
+        issues.push({
+          severity: "warning",
+          code: "page-render-failed",
+          message: `Page ${pageNumber} could not be rendered cleanly.`,
+        });
+      } finally {
+        page.cleanup();
+        canvas.width = 0;
+        canvas.height = 0;
       }
     }
 
-    pdf.cleanup();
+    if (pdf.numPages > pagesToRender) {
+      issues.push({
+        severity: "info",
+        code: "render-sampled-pages",
+        message: `Validated renderability on the first ${pagesToRender} pages to keep memory usage low.`,
+      });
+    }
+
+    if (renderablePages === 0 && pdf.numPages > 0) {
+      issues.push({
+        severity: "error",
+        code: "pdf-not-renderable",
+        message: "This PDF could not be rendered in the browser.",
+      });
+    }
+  } catch (error) {
+    if (isPasswordError(error)) {
+      issues.push({
+        severity: "error",
+        code: "password-protected",
+        message:
+          "This PDF is password protected. Unlock it before validation or repair.",
+      });
+    } else {
+      issues.push({
+        severity: "error",
+        code: "pdfjs-load-failed",
+        message: "This PDF could not be opened for rendering.",
+      });
+    }
+  } finally {
+    if (pdf) {
+      pdf.cleanup();
+    }
     await loadingTask.destroy();
-  } catch (err) {
-    pdfJsCanRender = false;
-    pdfJsError = err instanceof Error ? err.message : String(err);
   }
 
+  if (!pdfLibLoadable && pdfJsLoadable && renderablePages > 0) {
+    issues.push({
+      severity: "warning",
+      code: "repairable-structure-issues",
+      message:
+        "The PDF can render, but structural issues were detected. Rebuild may help.",
+    });
+  }
+
+  const hasError = issues.some((issue) => issue.severity === "error");
+  const hasWarning = issues.some((issue) => issue.severity === "warning");
+
+  const status: PdfValidationStatus = !pdfJsLoadable || hasError
+    ? "invalid"
+    : hasWarning
+      ? "repairable"
+      : "valid";
+
   return {
-    pdfLibCanLoad,
-    pdfJsCanRender,
+    status,
     pageCount,
-    pdfLibError,
-    pdfJsError,
-    isPasswordProtected,
+    fileSize,
+    pdfLibLoadable,
+    pdfJsLoadable,
+    renderablePages,
+    issues,
   };
 }
 
-/**
- * STRATEGY 1: Structural Rebuild
- * If pdf-lib can load the PDF, rebuild it page-by-page into a fresh document.
- */
-async function attemptStructuralRebuild(
-  file: File,
-  originalPageCount: number,
-): Promise<RepairStrategyResult> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
+export async function validatePdf(file: File): Promise<PdfValidationResult> {
+  let bytes: Uint8Array;
 
   try {
-    const sourcePdf = await PDFDocument.load(bytes, { ignoreEncryption: true });
-    const sourcePageCount = sourcePdf.getPageCount();
+    bytes = new Uint8Array(await file.arrayBuffer());
+  } catch {
+    throw new Error("The uploaded file could not be read.");
+  }
 
-    if (sourcePageCount === 0) {
-      return {
-        strategy: "structural-rebuild",
-        success: false,
-        originalPageCount,
-        error: "Source PDF has no pages.",
-      };
+  return validatePdfBytes(bytes, file.size);
+}
+
+async function rebuildWithPdfLib(file: File): Promise<Uint8Array> {
+  let sourceBytes: ArrayBuffer;
+
+  try {
+    sourceBytes = await file.arrayBuffer();
+  } catch {
+    throw new Error("The uploaded file could not be read.");
+  }
+
+  const sourcePdf = await PDFDocument.load(sourceBytes);
+
+  try {
+    const rebuiltPdf = await PDFDocument.create();
+    const copiedPages = await rebuiltPdf.copyPages(
+      sourcePdf,
+      sourcePdf.getPageIndices(),
+    );
+
+    for (const page of copiedPages) {
+      rebuiltPdf.addPage(page);
     }
 
-    // Create fresh output PDF
-    const outputPdf = await PDFDocument.create();
-    const sourcePages = sourcePdf.getPages();
-
-    // Copy each page safely
-    for (const sourcePage of sourcePages) {
-      try {
-        const [copiedPage] = await outputPdf.copyPages(sourcePdf, [
-          sourcePages.indexOf(sourcePage),
-        ]);
-        outputPdf.addPage(copiedPage);
-      } catch (pageErr) {
-        // If any page fails, abort structural rebuild
-        return {
-          strategy: "structural-rebuild",
-          success: false,
-          originalPageCount,
-          error: `Failed to copy page: ${pageErr instanceof Error ? pageErr.message : String(pageErr)}`,
-        };
-      }
-    }
-
-    const repairedBytes = await outputPdf.save();
-
-    return {
-      strategy: "structural-rebuild",
-      success: true,
-      repairedBytes,
-      repairedPageCount: sourcePageCount,
-      originalPageCount,
-    };
-  } catch (err) {
-    return {
-      strategy: "structural-rebuild",
-      success: false,
-      originalPageCount,
-      error: err instanceof Error ? err.message : String(err),
-    };
+    return rebuiltPdf.save();
+  } catch {
+    return sourcePdf.save();
   }
 }
 
-/**
- * STRATEGY 2: Raster Salvage
- * If PDF.js can render the document, rebuild it as JPEG-rasterized pages.
- * This is lossy but may save documents that structural methods cannot.
- */
-async function attemptRasterSalvage(
-  file: File,
-  originalPageCount: number,
-): Promise<RepairStrategyResult> {
+async function rebuildWithRasterFallback(file: File): Promise<Uint8Array> {
   try {
-    const repairedBytes = await rasterizePDFWithSettings(
-      file,
-      { scale: 1.5, quality: 0.85 },
-      true, // releaseResources
-    );
-
-    // Validate that rasterized output can be loaded
-    const validation = await validatePdf(
-      new File([repairedBytes], "repaired.pdf", { type: "application/pdf" }),
-    );
-
-    if (!validation.pdfLibCanLoad || !validation.pageCount) {
-      return {
-        strategy: "raster-salvage",
-        success: false,
-        originalPageCount,
-        error:
-          "Rasterized output failed validation. Could not verify repaired pages.",
-      };
-    }
-
-    return {
-      strategy: "raster-salvage",
-      success: true,
-      repairedBytes,
-      repairedPageCount: validation.pageCount,
-      originalPageCount,
-      warning:
-        "Pages were rebuilt as images. Text may no longer be selectable and vector/form/annotation data was lost.",
-    };
-  } catch (err) {
-    return {
-      strategy: "raster-salvage",
-      success: false,
-      originalPageCount,
-      error: err instanceof Error ? err.message : String(err),
-    };
+    return await rasterizePDFWithSettings(file, RASTER_FALLBACK_SETTINGS, true);
+  } catch {
+    throw new Error("PDF could not be rendered for raster fallback repair.");
   }
 }
 
-/**
- * Main repair orchestration: attempts strategies in order until one succeeds.
- * Strategy order:
- * 1. Structural rebuild (preferred, lossless)
- * 2. Raster salvage (fallback, lossy)
- */
 export async function repairPdf(
   file: File,
-  validation: PdfValidationResult,
-): Promise<PdfRepairResult> {
-  const startTime = performance.now();
-  const warnings: string[] = [];
+  options: RepairPdfOptions = {},
+): Promise<RepairPdfResult> {
+  const initialValidation = await validatePdf(file);
 
-  // Determine original page count
-  let originalPageCount = validation.pageCount ?? 0;
+  if (
+    initialValidation.status === "invalid" ||
+    !initialValidation.pdfJsLoadable ||
+    initialValidation.renderablePages === 0
+  ) {
+    throw new Error("Unable to repair this PDF in the browser.");
+  }
 
-  // If we couldn't determine page count, we can't proceed
-  if (originalPageCount === 0) {
-    if (validation.isPasswordProtected) {
-      return {
-        success: false,
-        repairMethod: "none",
-        originalPageCount,
-        validationResult: validation,
-        warnings: [
-          "This PDF is password protected. Use Unlock PDF first before attempting repair.",
-        ],
-        error:
-          "Password-protected PDFs must be unlocked before repair attempts.",
-        processingTime: performance.now() - startTime,
-      };
+  const shouldForceRaster = options.forceRasterFallback ?? false;
+  let repairedBytes: Uint8Array | null = null;
+  let method: RepairPdfResult["method"] = "direct";
+
+  if (!shouldForceRaster && initialValidation.pdfLibLoadable) {
+    try {
+      repairedBytes = await rebuildWithPdfLib(file);
+      method = "direct";
+    } catch {
+      repairedBytes = null;
     }
-
-    return {
-      success: false,
-      repairMethod: "none",
-      originalPageCount,
-      validationResult: validation,
-      warnings,
-      error: "Unable to determine PDF structure. Repair cannot proceed.",
-      processingTime: performance.now() - startTime,
-    };
   }
 
-  // Healthy PDF check: if both libraries work, don't repair
-  if (validation.pdfLibCanLoad && validation.pdfJsCanRender) {
-    return {
-      success: false,
-      repairMethod: "none",
-      originalPageCount,
-      validationResult: validation,
-      warnings,
-      error:
-        "This PDF is healthy and does not require repair. Both pdf-lib and PDF.js can process it successfully.",
-      processingTime: performance.now() - startTime,
-    };
-  }
-
-  // STRATEGY 1: Structural Rebuild
-  if (validation.pdfLibCanLoad) {
-    const result = await attemptStructuralRebuild(file, originalPageCount);
-
-    if (result.success && result.repairedBytes) {
-      // Post-repair validation
-      const postValidation = await validatePdf(
-        new File([result.repairedBytes], "repaired.pdf", {
-          type: "application/pdf",
-        }),
+  if (!repairedBytes) {
+    if (!options.allowRasterFallback) {
+      throw new Error(
+        "This PDF can only be rebuilt with raster fallback. Text may no longer be selectable.",
       );
-
-      if (!postValidation.pdfLibCanLoad) {
-        warnings.push(
-          "Post-repair validation warning: pdf-lib cannot re-load the repaired output.",
-        );
-      }
-      if (!postValidation.pdfJsCanRender) {
-        warnings.push(
-          "Post-repair validation warning: PDF.js cannot render the repaired output.",
-        );
-      }
-
-      return {
-        success: true,
-        repairMethod: "structural-rebuild",
-        repairedBytes: result.repairedBytes,
-        originalPageCount,
-        repairedPageCount: result.repairedPageCount,
-        validationResult: validation,
-        postRepairValidation: postValidation,
-        warnings,
-        processingTime: performance.now() - startTime,
-      };
     }
 
-    // Structural rebuild failed, log the error for debugging
-    warnings.push(`Structural rebuild failed: ${result.error || "unknown error"}`);
-  } else {
-    warnings.push(
-      "PDF structure cannot be read with pdf-lib. Skipping structural rebuild.",
-    );
+    repairedBytes = await rebuildWithRasterFallback(file);
+    method = "raster-fallback";
   }
 
-  // STRATEGY 2: Raster Salvage (only if PDF.js can render)
-  if (validation.pdfJsCanRender) {
-    const result = await attemptRasterSalvage(file, originalPageCount);
+  const repairedFile = new File([repairedBytes], buildRepairedFilename(file.name), {
+    type: "application/pdf",
+  });
+  const repairedValidation = await validatePdf(repairedFile);
 
-    if (result.success && result.repairedBytes) {
-      // Post-repair validation
-      const postValidation = await validatePdf(
-        new File([result.repairedBytes], "repaired.pdf", {
-          type: "application/pdf",
-        }),
-      );
-
-      if (!postValidation.pdfLibCanLoad) {
-        warnings.push(
-          "Post-repair validation warning: pdf-lib cannot re-load the rasterized output.",
-        );
-      }
-
-      return {
-        success: true,
-        repairMethod: "raster-salvage",
-        repairedBytes: result.repairedBytes,
-        originalPageCount,
-        repairedPageCount: result.repairedPageCount,
-        validationResult: validation,
-        postRepairValidation: postValidation,
-        warnings: [...warnings, result.warning || ""].filter(Boolean),
-        processingTime: performance.now() - startTime,
-      };
-    }
-
-    // Raster salvage also failed
-    warnings.push(`Raster salvage failed: ${result.error || "unknown error"}`);
-  } else {
-    warnings.push("PDF.js cannot render this document. Raster salvage not possible.");
+  if (
+    repairedValidation.status === "invalid" ||
+    !repairedValidation.pdfJsLoadable ||
+    repairedValidation.renderablePages === 0
+  ) {
+    throw new Error("Repaired PDF failed verification.");
   }
 
-  // All strategies failed
   return {
-    success: false,
-    repairMethod: "none",
-    originalPageCount,
-    validationResult: validation,
-    warnings,
-    error:
-      "This PDF is too severely damaged for DocFlow's browser-based recovery methods. No safe repair strategy could succeed.",
-    processingTime: performance.now() - startTime,
+    bytes: repairedBytes,
+    method,
+    originalSize: file.size,
+    repairedSize: repairedBytes.length,
+    pageCount: repairedValidation.pageCount ?? initialValidation.pageCount ?? 0,
+    validation: repairedValidation,
   };
-}
-
-/**
- * Orchestrator: validate, then repair if needed.
- * Returns comprehensive result with validation and repair information.
- */
-export async function validateAndRepairPdf(
-  file: File,
-): Promise<PdfRepairResult> {
-  const validation = await validatePdf(file);
-  const repairResult = await repairPdf(file, validation);
-  return repairResult;
 }

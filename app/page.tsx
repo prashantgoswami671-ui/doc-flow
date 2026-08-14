@@ -12,6 +12,7 @@ import MetadataEditorCard from "../components/MetadataEditorCard";
 import WatermarkPdfCard from "../components/WatermarkPdfCard";
 import ProtectPdfCard from "../components/ProtectPdfCard";
 import UnlockPdfCard from "../components/UnlockPdfCard";
+import RepairValidatePdfCard from "../components/RepairValidatePdfCard";
 import UploadCard from "../components/UploadCard";
 
 export default function Home() {
@@ -57,6 +58,9 @@ export default function Home() {
       </section>
       <section className="pb-20">
         <UnlockPdfCard />
+      </section>
+      <section className="pb-20">
+        <RepairValidatePdfCard />
       </section>
     </>
   );
