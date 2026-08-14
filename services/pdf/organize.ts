@@ -1,7 +1,22 @@
 import { degrees, PDFDocument } from "pdf-lib";
+import type { PageBox } from "./thumbnails";
 
 /** Relative, clockwise rotation applied on top of a page's existing /Rotate value. */
 export type PageRotation = 0 | 90 | 180 | 270;
+
+/**
+ * A crop rectangle in the PDF's own default user-space coordinate system:
+ * origin at the page's lower-left corner, x increasing right, y increasing
+ * up, units in points. `x`/`y` are absolute (they already include a page's
+ * existing CropBox offset, if any) so this can be passed directly to
+ * pdf-lib's `page.setCropBox(x, y, width, height)`.
+ */
+export interface PageCrop {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 /**
  * Editable state for a single page of the uploaded PDF.
@@ -18,12 +33,15 @@ export interface ManagedPage {
   selected: boolean;
   deleted: boolean;
   rotation: PageRotation;
+  /** Pending crop for this page, or undefined when the page isn't cropped. */
+  crop?: PageCrop;
 }
 
 /** One kept page of the output document, in output order. */
 export interface PageOperation {
   sourcePageNumber: number;
   rotation: PageRotation;
+  crop?: PageCrop;
 }
 
 export interface OrganizeResult {
@@ -31,6 +49,7 @@ export interface OrganizeResult {
   originalPageCount: number;
   deletedPageCount: number;
   rotatedPageCount: number;
+  croppedPageCount: number;
   remainingPageCount: number;
   reordered: boolean;
   processingTime: number;
@@ -95,7 +114,146 @@ export function buildPageOperations(pages: ManagedPage[]): PageOperation[] {
     .map((page) => ({
       sourcePageNumber: page.sourcePageNumber,
       rotation: page.rotation,
+      crop: page.crop,
     }));
+}
+
+// ---------------------------------------------------------------------------
+// Crop coordinate conversion
+//
+// The crop editor draws over an UNROTATED render of a page (see
+// `renderCropEditorPreview` in services/pdf/thumbnails.ts), in ordinary
+// screen/canvas pixel space: origin top-left, x right, y down. A page's
+// PDF coordinate space (and its CropBox) uses origin bottom-left, x right,
+// y up, in points. These helpers make that conversion explicit in both
+// directions, using the page's actual current box (`PageBox`, from
+// pdf-lib's CropBox/MediaBox) and the actual render scale (pixels per
+// point) — never a guessed or assumed factor.
+//
+// Because the render is always unrotated, these conversions are the same
+// regardless of what rotation (if any) the user has additionally applied
+// for display — rotation only affects how the rectangle is drawn on
+// screen (a CSS transform applied by the caller), never how it is stored
+// or applied to the PDF. This is also how the PDF spec itself treats
+// CropBox vs. /Rotate: CropBox is always defined in the page's default,
+// unrotated user space, and /Rotate is applied on top for display/print.
+// ---------------------------------------------------------------------------
+
+export interface PixelRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Converts a crop rectangle from unrotated render-pixel space into PDF point space. */
+export function pixelCropToPdfCrop(
+  pixelRect: PixelRect,
+  renderScale: number,
+  pageBox: PageBox,
+): PageCrop {
+  const width = pixelRect.width / renderScale;
+  const height = pixelRect.height / renderScale;
+  const x = pageBox.x + pixelRect.x / renderScale;
+  // Flip Y: pixel y grows downward from the top; PDF y grows upward from the bottom.
+  const y = pageBox.y + (pageBox.height - pixelRect.y / renderScale - height);
+
+  return { x, y, width, height };
+}
+
+/** Converts a crop rectangle from PDF point space back into unrotated render-pixel space. */
+export function pdfCropToPixelCrop(
+  crop: PageCrop,
+  renderScale: number,
+  pageBox: PageBox,
+): PixelRect {
+  const width = crop.width * renderScale;
+  const height = crop.height * renderScale;
+  const x = (crop.x - pageBox.x) * renderScale;
+  const y = (pageBox.height - (crop.y - pageBox.y) - crop.height) * renderScale;
+
+  return { x, y, width, height };
+}
+
+/** Clamps a crop rectangle so it stays fully inside the page's current box. */
+export function clampCropToPageBox(crop: PageCrop, pageBox: PageBox): PageCrop {
+  const width = Math.min(Math.max(crop.width, 0), pageBox.width);
+  const height = Math.min(Math.max(crop.height, 0), pageBox.height);
+  const x = Math.min(
+    Math.max(crop.x, pageBox.x),
+    pageBox.x + pageBox.width - width,
+  );
+  const y = Math.min(
+    Math.max(crop.y, pageBox.y),
+    pageBox.y + pageBox.height - height,
+  );
+
+  return { x, y, width, height };
+}
+
+/** Expresses a crop rectangle as fractions (0–1) of its page box, for reuse on other pages. */
+export interface RelativeCrop {
+  xFrac: number;
+  yFrac: number;
+  widthFrac: number;
+  heightFrac: number;
+}
+
+export function relativeCropFromPageBox(
+  crop: PageCrop,
+  pageBox: PageBox,
+): RelativeCrop {
+  return {
+    xFrac: (crop.x - pageBox.x) / pageBox.width,
+    yFrac: (crop.y - pageBox.y) / pageBox.height,
+    widthFrac: crop.width / pageBox.width,
+    heightFrac: crop.height / pageBox.height,
+  };
+}
+
+/** Reconstructs an absolute crop rectangle for a (possibly different) page from relative fractions. */
+export function cropFromRelative(
+  relative: RelativeCrop,
+  pageBox: PageBox,
+): PageCrop {
+  return clampCropToPageBox(
+    {
+      x: pageBox.x + relative.xFrac * pageBox.width,
+      y: pageBox.y + relative.yFrac * pageBox.height,
+      width: relative.widthFrac * pageBox.width,
+      height: relative.heightFrac * pageBox.height,
+    },
+    pageBox,
+  );
+}
+
+/**
+ * Maps a normalized pointer position from DISPLAY space (i.e. the page as
+ * currently shown on screen, including any additional rotation applied via
+ * CSS transform) back to normalized coordinates in the page's own unrotated
+ * render space. `nx`/`ny` are each in [0, 1], measured against the element's
+ * on-screen (post-transform) bounding box.
+ *
+ * Rotation here is intentionally just the display-only rotation (source
+ * PDF's /Rotate plus the user's chosen delta) — it never touches the stored
+ * crop, only how a pointer position over the rotated preview is interpreted.
+ */
+export function displayNormalizedToNative(
+  nx: number,
+  ny: number,
+  rotation: PageRotation,
+): { ux: number; uy: number } {
+  switch (rotation) {
+    case 90:
+      return { ux: ny, uy: 1 - nx };
+    case 180:
+      return { ux: 1 - nx, uy: 1 - ny };
+    case 270:
+      return { ux: 1 - ny, uy: nx };
+    case 0:
+    default:
+      return { ux: nx, uy: ny };
+  }
 }
 
 function validateOperations(
@@ -131,18 +289,30 @@ function validateOperations(
       throw new Error("Rotation must be 0, 90, 180, or 270 degrees.");
     }
 
+    if (operation.crop) {
+      const { width, height } = operation.crop;
+
+      if (!(width > 0) || !(height > 0)) {
+        throw new Error(
+          `The crop for page ${sourcePageNumber} must have a positive width and height.`,
+        );
+      }
+    }
+
     seen.add(sourcePageNumber);
   }
 }
 
 /**
- * Applies deletions, rotations and reordering to the uploaded PDF in a single
- * pass over one document.
+ * Applies deletions, rotations, crops, and reordering to the uploaded PDF in
+ * a single pass over one document.
  *
- * Pages that survive are the original page objects, so their content,
- * MediaBox/CropBox and other page-level entries are carried over untouched;
- * only /Rotate is updated, relative to whatever the page already had. The
- * uploaded file is never modified in place.
+ * Pages that survive are the original page objects, so their content is
+ * carried over untouched; only /Rotate and, when a crop is requested, the
+ * CropBox are updated. Cropping only adjusts CropBox — it never rasterizes,
+ * resizes, or redraws page content, so the underlying vectors/text/links are
+ * preserved and the crop remains fully reversible. The uploaded file is
+ * never modified in place.
  */
 export async function organizePages(
   file: File,
@@ -161,13 +331,31 @@ export async function organizePages(
   );
 
   for (const operation of operations) {
-    if (operation.rotation === 0) continue;
-
     const page = sourcePages[operation.sourcePageNumber - 1];
 
-    page.setRotation(
-      degrees(normalizeRotation(page.getRotation().angle + operation.rotation)),
-    );
+    if (operation.rotation !== 0) {
+      page.setRotation(
+        degrees(normalizeRotation(page.getRotation().angle + operation.rotation)),
+      );
+    }
+
+    if (operation.crop) {
+      const currentBox = page.getCropBox();
+      const clamped = clampCropToPageBox(operation.crop, {
+        x: currentBox.x,
+        y: currentBox.y,
+        width: currentBox.width,
+        height: currentBox.height,
+      });
+
+      if (clamped.width <= 0 || clamped.height <= 0) {
+        throw new Error(
+          `The crop for page ${operation.sourcePageNumber} is outside the page bounds.`,
+        );
+      }
+
+      page.setCropBox(clamped.x, clamped.y, clamped.width, clamped.height);
+    }
   }
 
   const reordered = operations.some(
@@ -198,6 +386,7 @@ export async function organizePages(
     deletedPageCount: originalPageCount - operations.length,
     rotatedPageCount: operations.filter((operation) => operation.rotation !== 0)
       .length,
+    croppedPageCount: operations.filter((operation) => operation.crop).length,
     remainingPageCount: operations.length,
     reordered,
     processingTime: performance.now() - startTime,
