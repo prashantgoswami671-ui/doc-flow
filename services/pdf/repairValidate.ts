@@ -72,7 +72,7 @@ async function validatePdfBytes(
   let renderablePages = 0;
 
   try {
-    const loaded = await PDFDocument.load(bytes.buffer.slice(0));
+    const loaded = await PDFDocument.load(bytes);
 
     pdfLibLoadable = true;
     pageCount = loaded.getPageCount();
@@ -104,17 +104,21 @@ async function validatePdfBytes(
   }
 
   const loadingTask = pdfjsLib.getDocument({ data: bytes });
-  let pdf: { numPages: number; getPage: (pageNumber: number) => Promise<any>; cleanup: () => void } | null = null;
+  let pdf: Awaited<typeof loadingTask.promise> | null = null;
 
   try {
-    pdf = await loadingTask.promise;
+    const loadedPdf = await loadingTask.promise;
+    pdf = loadedPdf;
     pdfJsLoadable = true;
-    pageCount = pageCount ?? pdf.numPages;
+    pageCount = pageCount ?? loadedPdf.numPages;
 
-    const pagesToRender = Math.min(pdf.numPages, MAX_VALIDATION_RENDER_PAGES);
+    const pagesToRender = Math.min(
+      loadedPdf.numPages,
+      MAX_VALIDATION_RENDER_PAGES,
+    );
 
     for (let pageNumber = 1; pageNumber <= pagesToRender; pageNumber++) {
-      const page = await pdf.getPage(pageNumber);
+      const page = await loadedPdf.getPage(pageNumber);
       const canvas = document.createElement("canvas");
 
       try {
@@ -147,7 +151,7 @@ async function validatePdfBytes(
       }
     }
 
-    if (pdf.numPages > pagesToRender) {
+    if (loadedPdf.numPages > pagesToRender) {
       issues.push({
         severity: "info",
         code: "render-sampled-pages",
@@ -155,7 +159,7 @@ async function validatePdfBytes(
       });
     }
 
-    if (renderablePages === 0 && pdf.numPages > 0) {
+    if (renderablePages === 0 && loadedPdf.numPages > 0) {
       issues.push({
         severity: "error",
         code: "pdf-not-renderable",
@@ -299,9 +303,13 @@ export async function repairPdf(
     method = "raster-fallback";
   }
 
-  const repairedFile = new File([repairedBytes], buildRepairedFilename(file.name), {
-    type: "application/pdf",
-  });
+  const repairedFile = new File(
+    [repairedBytes as BlobPart],
+    buildRepairedFilename(file.name),
+    {
+      type: "application/pdf",
+    },
+  );
   const repairedValidation = await validatePdf(repairedFile);
 
   if (
