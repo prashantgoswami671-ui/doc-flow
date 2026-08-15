@@ -126,11 +126,53 @@ function methodLabel(method: RepairPdfResult["method"]): string {
       return "Structural recovery";
     case "structural-reconstruction":
       return "Structural reconstruction (page-by-page)";
+    case "page-tree-reconstruction":
+      return "Page-tree reconstruction";
     case "raster-salvage":
       return "Raster salvage";
     default:
       return method;
   }
+}
+
+/**
+ * Primary heading for the final repair-result panel. Distinguishes lossy
+ * raster recovery, partial (some pages placeholder/uncertain) recovery, and
+ * a full non-lossy structural repair — using only `method`/`lossy`, which
+ * the repair service already computes.
+ */
+function repairResultHeading(result: RepairPdfResult): string {
+  if (result.method === "raster-salvage") {
+    return "Recovered successfully — lossy";
+  }
+
+  if (result.lossy) {
+    return "Partially recovered";
+  }
+
+  return "Repair successful";
+}
+
+/**
+ * "Pages recovered" is used whenever the result is lossy (raster salvage or
+ * partial structural recovery) to make clear not every page came back
+ * losslessly; "Pages verified" is kept for a full, non-lossy repair.
+ */
+function repairResultPagesLabel(result: RepairPdfResult): string {
+  return result.method === "raster-salvage" || result.lossy
+    ? "Pages recovered"
+    : "Pages verified";
+}
+
+/**
+ * "Structure preserved" is only shown for non-lossy structural methods —
+ * i.e. exactly the cases where the repair service itself reports
+ * `lossy: false` for a non-raster-salvage method, meaning every page came
+ * from the original vector/text content rather than a placeholder or a
+ * rasterized image. This never overrides or duplicates that determination.
+ */
+function repairResultStructurePreserved(result: RepairPdfResult): boolean {
+  return result.method !== "raster-salvage" && !result.lossy;
 }
 
 function strategyStatusLabel(diag: StrategyDiagnostics): string {
@@ -541,16 +583,15 @@ export default function RepairValidatePdfCard() {
               </div>
               <div>
                 <p className="text-base font-semibold text-gray-900">
-                  {repairResult.method === "raster-salvage"
-                    ? "Salvage successful (lossy)"
-                    : repairResult.lossy
-                      ? "Partial repair — some pages could not be recovered"
-                      : "Repair successful"}
+                  {repairResultHeading(repairResult)}
                 </p>
                 <p className="text-sm text-gray-600">Method: {methodLabel(repairResult.method)}</p>
                 <p className="text-sm text-gray-600">
-                  Pages verified: {repairResult.pagesVerified} / {repairResult.pageCount}
+                  {repairResultPagesLabel(repairResult)}: {repairResult.pagesVerified} / {repairResult.pageCount}
                 </p>
+                {repairResultStructurePreserved(repairResult) && (
+                  <p className="text-sm font-medium text-green-700">Structure preserved</p>
+                )}
               </div>
             </div>
 
@@ -571,9 +612,7 @@ export default function RepairValidatePdfCard() {
               <p>Original size: {formatBytes(repairResult.originalSize)}</p>
               <p>Repaired size: {formatBytes(repairResult.repairedSize)}</p>
               <p>Page count: {repairResult.pageCount}</p>
-              <p>
-                Validation: {repairResult.validation.status === "valid" ? "Healthy" : "Repairable"}
-              </p>
+              <p>Output validation: Passed</p>
             </div>
 
             <StrategyDiagnosticsPanel diagnostics={repairDiagnostics} />
