@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { protectPDF, type ProtectPdfResult } from "../services/pdf/protect";
+import ResultPanel from "./ResultPanel";
 
 function isPdfFile(file: File): boolean {
   return (
@@ -349,43 +350,20 @@ export default function ProtectPdfCard() {
         </div>
 
         {result && selectedFile && (
-          <div className="border-t border-gray-100 bg-gray-50 px-4 sm:px-6 py-6">
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 text-xl">
-                🔒
-              </div>
-              <div>
-                <p className="text-base font-semibold text-gray-900">
-                  Protection complete
-                </p>
-                <p className="text-sm text-gray-500">
-                  {result.pageCount} page{result.pageCount === 1 ? "" : "s"} ·{" "}
-                  {(result.processingTime / 1000).toFixed(2)}s
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() =>
-                downloadPdfBytes(
-                  result.bytes,
-                  getProtectedFilename(selectedFile.name),
-                )
-              }
-              className="w-full rounded-xl bg-blue-600 py-3 text-base font-semibold text-white transition hover:bg-blue-700"
-            >
-              Download Protected PDF
-            </button>
-
-            <button
-              type="button"
-              onClick={handleProtectAnother}
-              className="mt-3 w-full rounded-xl border border-gray-300 bg-white py-3 text-base font-semibold text-gray-700 transition hover:bg-gray-50"
-            >
-              Protect another PDF
-            </button>
-          </div>
+          <ResultPanel
+            icon="🔒"
+            title="Protection complete"
+            message={`${result.pageCount} page${result.pageCount === 1 ? "" : "s"} · ${(result.processingTime / 1000).toFixed(2)}s`}
+            onDownload={() =>
+              downloadPdfBytes(
+                result.bytes,
+                getProtectedFilename(selectedFile.name),
+              )
+            }
+            downloadLabel="Download Protected PDF"
+            onReset={handleProtectAnother}
+            resetLabel="Protect another PDF"
+          />
         )}
       </div>
     </div>
