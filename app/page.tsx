@@ -1,65 +1,95 @@
 import AppShell from "../components/AppShell";
-import Hero from "../components/Hero";
-import ExtractPagesCard from "../components/ExtractPagesCard";
+import HomeHero from "../components/home/HomeHero";
+import ToolCategoryGrid from "../components/home/ToolCategoryGrid";
 import OrganizePagesCard from "../components/OrganizePagesCard";
-import FixPageOrientationCard from "../components/FixPageOrientationCard";
+import ExtractPagesCard from "../components/ExtractPagesCard";
+import SplitPdfCard from "../components/SplitPdfCard";
+import InsertPagesCard from "../components/InsertPagesCard";
 import MergePdfCard from "../components/MergePdfCard";
 import ImageToPdfCard from "../components/ImageToPdfCard";
 import PdfToImageCard from "../components/PdfToImageCard";
-import SplitPdfCard from "../components/SplitPdfCard";
-import InsertPagesCard from "../components/InsertPagesCard";
+import UploadCard from "../components/UploadCard";
+import FixPageOrientationCard from "../components/FixPageOrientationCard";
+import RepairValidatePdfCard from "../components/RepairValidatePdfCard";
 import MetadataEditorCard from "../components/MetadataEditorCard";
 import WatermarkPdfCard from "../components/WatermarkPdfCard";
 import ProtectPdfCard from "../components/ProtectPdfCard";
 import UnlockPdfCard from "../components/UnlockPdfCard";
-import RepairValidatePdfCard from "../components/RepairValidatePdfCard";
-import UploadCard from "../components/UploadCard";
 
 export default function Home() {
   return (
     <AppShell>
-      <Hero />
-      <section id="enhance" className="pb-20 -mt-8">
-        <UploadCard />
-      </section>
-      <section className="pb-20">
-        <ExtractPagesCard />
-      </section>
+      <HomeHero />
+      <ToolCategoryGrid />
+
       <section id="organize" className="pb-20">
-        <OrganizePagesCard />
+        <div className="mx-auto max-w-2xl px-4 sm:px-6">
+          <h2 className="text-2xl font-bold text-gray-900">Organize</h2>
+          <p className="mt-1.5 text-sm text-gray-600">
+            Delete, rotate, reorder, extract, split, and insert pages.
+          </p>
+        </div>
+        <div className="mt-8 space-y-12">
+          <OrganizePagesCard />
+          <ExtractPagesCard />
+          <SplitPdfCard />
+          <InsertPagesCard />
+        </div>
       </section>
-      <section id="create" className="pb-20">
-        <MergePdfCard />
+
+      <section id="create" className="border-t border-gray-200 pb-20 pt-16">
+        <div className="mx-auto max-w-2xl px-4 sm:px-6">
+          <h2 className="text-2xl font-bold text-gray-900">Create</h2>
+          <p className="mt-1.5 text-sm text-gray-600">
+            Merge PDFs and turn images into PDFs.
+          </p>
+        </div>
+        <div className="mt-8 space-y-12">
+          <MergePdfCard />
+          <ImageToPdfCard />
+        </div>
       </section>
-      <section className="pb-20">
-        <ImageToPdfCard />
+
+      <section id="convert" className="border-t border-gray-200 pb-20 pt-16">
+        <div className="mx-auto max-w-2xl px-4 sm:px-6">
+          <h2 className="text-2xl font-bold text-gray-900">Convert</h2>
+          <p className="mt-1.5 text-sm text-gray-600">
+            Convert PDF pages into images.
+          </p>
+        </div>
+        <div className="mt-8">
+          <PdfToImageCard />
+        </div>
       </section>
-      <section id="convert" className="pb-20">
-        <PdfToImageCard />
+
+      <section id="enhance" className="border-t border-gray-200 pb-20 pt-16">
+        <div className="mx-auto max-w-2xl px-4 sm:px-6">
+          <h2 className="text-2xl font-bold text-gray-900">Enhance</h2>
+          <p className="mt-1.5 text-sm text-gray-600">
+            Compress, repair, validate, fix orientation, and add finishing
+            touches.
+          </p>
+        </div>
+        <div className="mt-8 space-y-12">
+          <UploadCard />
+          <FixPageOrientationCard />
+          <RepairValidatePdfCard />
+          <MetadataEditorCard />
+          <WatermarkPdfCard />
+        </div>
       </section>
-      <section className="pb-20">
-        <SplitPdfCard />
-      </section>
-      <section className="pb-20">
-        <InsertPagesCard />
-      </section>
-      <section className="pb-20">
-        <MetadataEditorCard />
-      </section>
-      <section className="pb-20">
-        <FixPageOrientationCard />
-      </section>
-      <section className="pb-20">
-        <WatermarkPdfCard />
-      </section>
-      <section id="protect" className="pb-20">
-        <ProtectPdfCard />
-      </section>
-      <section className="pb-20">
-        <UnlockPdfCard />
-      </section>
-      <section className="pb-20">
-        <RepairValidatePdfCard />
+
+      <section id="protect" className="border-t border-gray-200 pb-20 pt-16">
+        <div className="mx-auto max-w-2xl px-4 sm:px-6">
+          <h2 className="text-2xl font-bold text-gray-900">Protect</h2>
+          <p className="mt-1.5 text-sm text-gray-600">
+            Password-protect and unlock PDFs.
+          </p>
+        </div>
+        <div className="mt-8 space-y-12">
+          <ProtectPdfCard />
+          <UnlockPdfCard />
+        </div>
       </section>
     </AppShell>
   );
