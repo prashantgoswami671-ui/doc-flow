@@ -1,4 +1,4 @@
-import Navbar from "../components/Navbar";
+import AppShell from "../components/AppShell";
 import Hero from "../components/Hero";
 import ExtractPagesCard from "../components/ExtractPagesCard";
 import OrganizePagesCard from "../components/OrganizePagesCard";
@@ -17,25 +17,24 @@ import UploadCard from "../components/UploadCard";
 
 export default function Home() {
   return (
-    <>
-      <Navbar />
+    <AppShell>
       <Hero />
-      <section className="pb-20 -mt-8">
+      <section id="enhance" className="pb-20 -mt-8">
         <UploadCard />
       </section>
       <section className="pb-20">
         <ExtractPagesCard />
       </section>
-      <section className="pb-20">
+      <section id="organize" className="pb-20">
         <OrganizePagesCard />
       </section>
-      <section className="pb-20">
+      <section id="create" className="pb-20">
         <MergePdfCard />
       </section>
       <section className="pb-20">
         <ImageToPdfCard />
       </section>
-      <section className="pb-20">
+      <section id="convert" className="pb-20">
         <PdfToImageCard />
       </section>
       <section className="pb-20">
@@ -53,7 +52,7 @@ export default function Home() {
       <section className="pb-20">
         <WatermarkPdfCard />
       </section>
-      <section className="pb-20">
+      <section id="protect" className="pb-20">
         <ProtectPdfCard />
       </section>
       <section className="pb-20">
@@ -62,6 +61,6 @@ export default function Home() {
       <section className="pb-20">
         <RepairValidatePdfCard />
       </section>
-    </>
+    </AppShell>
   );
 }
