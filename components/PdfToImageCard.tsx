@@ -7,6 +7,7 @@ import {
   type PdfToImagePageResult,
 } from "../services/pdf/pdfToImage";
 import { renderPageThumbnails, type PageThumbnail } from "../services/pdf/thumbnails";
+import PageThumbnailGrid from "./PageThumbnailGrid";
 
 function isPdfFile(file: File): boolean {
   return (
@@ -432,44 +433,13 @@ export default function PdfToImageCard() {
                       )}
                     </div>
 
-                    <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {thumbnails.map((thumbnail) => {
-                        const isSelected = selectedPages.has(thumbnail.pageNumber);
-
-                        return (
-                          <button
-                            key={thumbnail.pageNumber}
-                            type="button"
-                            aria-pressed={isSelected}
-                            aria-label={`Page ${thumbnail.pageNumber}`}
-                            onClick={() => togglePageSelection(thumbnail.pageNumber)}
-                            disabled={isProcessing}
-                            className={`flex flex-col rounded-lg border-2 p-2 transition-colors ${
-                              isSelected
-                                ? "border-blue-500 bg-blue-50"
-                                : "border-gray-200 bg-white"
-                            }`}
-                          >
-                            <span className="flex h-28 w-full items-center justify-center overflow-hidden rounded bg-gray-100">
-                              {thumbnail.dataUrl ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={thumbnail.dataUrl}
-                                  alt={`Page ${thumbnail.pageNumber} preview`}
-                                  className="max-h-full max-w-full object-contain"
-                                />
-                              ) : (
-                                <span className="text-xs text-gray-500">
-                                  Preview off
-                                </span>
-                              )}
-                            </span>
-                            <span className="mt-2 text-center text-xs font-semibold text-gray-700">
-                              Page {thumbnail.pageNumber}
-                            </span>
-                          </button>
-                        );
-                      })}
+                    <div className="mt-3">
+                      <PageThumbnailGrid
+                        pages={thumbnails}
+                        isSelected={(page) => selectedPages.has(page.pageNumber)}
+                        onPageClick={(page) => togglePageSelection(page.pageNumber)}
+                        disabled={isProcessing}
+                      />
                     </div>
                   </>
                 )}
