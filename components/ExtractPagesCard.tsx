@@ -6,6 +6,7 @@ import {
   extractPages,
   type ExtractionResult,
 } from "../services/pdf/extract";
+import ProcessingState from "./ProcessingState";
 import UploadZone from "./UploadZone";
 
 function isPdfFile(file: File): boolean {
@@ -171,7 +172,9 @@ export default function ExtractPagesCard() {
                 : "bg-gray-200 text-gray-400 cursor-not-allowed"
             }`}
           >
-            {isProcessing ? "Extracting pages..." : "Extract Pages"}
+            <ProcessingState isProcessing={isProcessing} message="Extracting pages...">
+              Extract Pages
+            </ProcessingState>
           </button>
         </div>
       </div>
