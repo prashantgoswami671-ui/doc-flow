@@ -54,20 +54,20 @@ export default function ToolCategoryGrid() {
   return (
     <section
       aria-labelledby="workflow-categories-heading"
-      className="py-14 sm:py-16"
+      className="border-b border-gray-200 bg-gray-50/60 py-16 sm:py-20"
     >
       <div className="mx-auto max-w-5xl px-4 sm:px-6">
         <h2
           id="workflow-categories-heading"
-          className="text-2xl font-bold text-gray-900"
+          className="text-2xl font-bold tracking-tight text-gray-900"
         >
           Explore by workflow
         </h2>
-        <p className="mt-2 text-sm text-gray-600">
+        <p className="mt-2 max-w-2xl text-sm text-gray-600">
           Jump straight to the kind of work you need to do.
         </p>
 
-        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="mt-10 grid grid-cols-1 items-stretch gap-5 sm:grid-cols-2 lg:grid-cols-5">
           {CATEGORIES.map((category) => (
             <ToolCategoryCard key={category.name} {...category} />
           ))}
