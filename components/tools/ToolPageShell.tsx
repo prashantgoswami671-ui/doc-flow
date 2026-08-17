@@ -15,7 +15,7 @@ type ToolPageShellProps = {
 /**
  * Shared workspace shell for every dedicated tool page (/tools/{slug}).
  * Renders the DocFlow context around an existing, unmodified tool
- * component: back navigation to the tool's category, the category label,
+ * component: a DocFlow / Category / Tool breadcrumb, the category label,
  * the tool's name/description (sourced from lib/toolCatalog.ts, never
  * duplicated here), and an optional list of related tools in the same
  * category. Holds no PDF/document state and does not constrain the width
@@ -31,12 +31,31 @@ export default function ToolPageShell({ tool, children }: ToolPageShellProps) {
   return (
     <section className="pb-20 pt-10 sm:pt-12">
       <div className="mx-auto max-w-2xl px-4 sm:px-6">
-        <Link
-          href={`/#${tool.category}`}
-          className="text-sm font-medium text-blue-600 hover:text-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 rounded-sm"
-        >
-          ← Back to {categoryLabel}
-        </Link>
+        <nav aria-label="Breadcrumb">
+          <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-gray-500">
+            <li className="flex items-center gap-x-1.5">
+              <Link
+                href="/"
+                className="font-medium text-blue-600 hover:text-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 rounded-sm"
+              >
+                DocFlow
+              </Link>
+              <span aria-hidden="true">/</span>
+            </li>
+            <li className="flex items-center gap-x-1.5">
+              <Link
+                href={`/#${tool.category}`}
+                className="font-medium text-blue-600 hover:text-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 rounded-sm"
+              >
+                {categoryLabel}
+              </Link>
+              <span aria-hidden="true">/</span>
+            </li>
+            <li aria-current="page" className="truncate font-medium text-gray-700">
+              {tool.name}
+            </li>
+          </ol>
+        </nav>
 
         <p className="mt-6 text-xs font-semibold uppercase tracking-widest text-blue-600">
           {categoryLabel}
