@@ -8,6 +8,8 @@ import {
 } from "../services/pdf/pdfToImage";
 import { renderPageThumbnails, type PageThumbnail } from "../services/pdf/thumbnails";
 import PageThumbnailGrid from "./PageThumbnailGrid";
+import ResultPanel from "./ResultPanel";
+import { formatFileSize } from "./ResultCard";
 
 function isPdfFile(file: File): boolean {
   return (
@@ -94,7 +96,6 @@ export default function PdfToImageCard() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [conversionProgress, setConversionProgress] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [results, setResults] = useState<GeneratedImage[]>([]);
   const [processingTime, setProcessingTime] = useState<number | null>(null);
 
@@ -116,7 +117,6 @@ export default function PdfToImageCard() {
       revokeGeneratedImages(current);
       return [];
     });
-    setSuccessMessage(null);
     setError(null);
     setProcessingTime(null);
   };
@@ -224,7 +224,6 @@ export default function PdfToImageCard() {
     isProcessingRef.current = true;
     setIsProcessing(true);
     setError(null);
-    setSuccessMessage(null);
     setConversionProgress("Starting conversion...");
 
     try {
@@ -253,11 +252,6 @@ export default function PdfToImageCard() {
         return generated;
       });
       setProcessingTime(conversionResult.processingTime);
-      setSuccessMessage(
-        `Converted ${generated.length} page${
-          generated.length === 1 ? "" : "s"
-        } to ${outputFormat.toUpperCase()}.`,
-      );
     } catch (conversionError) {
       console.error("PDF to image error:", conversionError);
       setError(
@@ -296,6 +290,11 @@ export default function PdfToImageCard() {
     !isProcessing &&
     (selectionMode === "all" || selectedCount > 0);
 
+  // While a PDF's page previews are loading or a conversion is in flight,
+  // the upload area must reject new files/drops so the in-progress work
+  // can't be interrupted or replaced out from under itself.
+  const uploadDisabled = isProcessing || isLoadingPreviews;
+
   const selectClasses =
     "mt-2 w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-400";
   const labelClasses = "block text-sm font-medium text-gray-700";
@@ -324,31 +323,42 @@ export default function PdfToImageCard() {
         <div
           role="button"
           tabIndex={0}
-          onClick={() => fileInputRef.current?.click()}
+          aria-disabled={uploadDisabled || undefined}
+          onClick={() => {
+            if (!uploadDisabled) fileInputRef.current?.click();
+          }}
           onKeyDown={(event) => {
+            if (uploadDisabled) return;
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               fileInputRef.current?.click();
             }
           }}
-          onDragEnter={() => setIsDragging(true)}
+          onDragEnter={() => {
+            if (!uploadDisabled) setIsDragging(true);
+          }}
           onDragLeave={() => setIsDragging(false)}
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
             event.preventDefault();
             setIsDragging(false);
+            if (uploadDisabled) return;
             selectFile(event.dataTransfer.files?.[0]);
           }}
-          className={`mx-4 sm:mx-6 mt-6 mb-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors cursor-pointer ${
-            isDragging
-              ? "border-blue-500 bg-blue-50"
-              : "border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
+          className={`mx-4 sm:mx-6 mt-6 mb-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors ${
+            uploadDisabled
+              ? "cursor-not-allowed border-gray-200 bg-gray-50 opacity-60"
+              : isDragging
+                ? "cursor-pointer border-blue-500 bg-blue-50"
+                : "cursor-pointer border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
           }`}
         >
           <p className="text-base font-medium text-gray-800 text-center">
             Choose a PDF to convert
           </p>
-          <p className="mt-1 text-sm text-gray-500">or drag and drop it here</p>
+          <p className="mt-1 text-sm text-gray-500 text-center">
+            or drag and drop it here &middot; PDF files only
+          </p>
         </div>
 
         <div className="px-4 sm:px-6 pb-6">
@@ -358,7 +368,9 @@ export default function PdfToImageCard() {
                 {selectedFile.name}
               </p>
               <p className="mt-1 text-sm text-gray-500">
-                {(selectedFile.size / 1024).toFixed(2)} KB
+                {thumbnails.length > 0
+                  ? `${thumbnails.length} page${thumbnails.length === 1 ? "" : "s"} \u00b7 ${formatFileSize(selectedFile.size)}`
+                  : formatFileSize(selectedFile.size)}
               </p>
             </div>
           )}
@@ -369,11 +381,8 @@ export default function PdfToImageCard() {
             </p>
           )}
           {error && (
-            <p className="mt-4 text-sm font-medium text-red-600">{error}</p>
-          )}
-          {successMessage && (
-            <p className="mt-4 text-sm font-medium text-green-600">
-              {successMessage}
+            <p role="alert" className="mt-4 text-sm font-medium text-red-600">
+              {error}
             </p>
           )}
 
@@ -410,6 +419,14 @@ export default function PdfToImageCard() {
                     Selected pages
                   </label>
                 </div>
+
+                <p className="mt-2 text-xs text-gray-500">
+                  {selectionMode === "all"
+                    ? `All ${thumbnails.length} page${thumbnails.length === 1 ? "" : "s"} will be converted`
+                    : selectedCount > 0
+                      ? `${selectedCount} page${selectedCount === 1 ? "" : "s"} selected \u00b7 ${selectedCount} image${selectedCount === 1 ? "" : "s"} will be created`
+                      : "Select at least one page below"}
+                </p>
 
                 {selectionMode === "selected" && (
                   <>
@@ -472,6 +489,11 @@ export default function PdfToImageCard() {
                         </option>
                       ))}
                     </select>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {outputFormat === "jpg"
+                        ? "JPG \u2014 smaller files, adjustable quality."
+                        : "PNG \u2014 lossless image quality, larger files."}
+                    </p>
                   </div>
 
                   <div>
@@ -497,6 +519,10 @@ export default function PdfToImageCard() {
                         </option>
                       ))}
                     </select>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Lower resolution means a smaller, faster file; higher
+                      resolution means more detail and a larger file.
+                    </p>
                   </div>
                 </div>
 
@@ -541,76 +567,132 @@ export default function PdfToImageCard() {
             type="button"
             onClick={handleConvert}
             disabled={!canConvert}
-            className={`mt-6 w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
+            aria-busy={isProcessing}
+            className={`mt-6 flex w-full items-center justify-center rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
               canConvert
                 ? "bg-blue-600 text-white hover:bg-blue-700"
                 : "bg-gray-200 text-gray-400 cursor-not-allowed"
             }`}
           >
+            {isProcessing && (
+              <svg
+                className="mr-2 h-4 w-4 animate-spin"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
+              </svg>
+            )}
             {isProcessing ? "Converting..." : "Convert to Images"}
           </button>
 
-          {results.length > 0 && selectedFile && (
-            <div className="mt-6">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-gray-700">
-                  {results.length} image{results.length === 1 ? "" : "s"} ready
-                </p>
-                {results.length > 1 && (
+        </div>
+
+        {results.length > 0 && selectedFile && (
+          <ResultPanel
+            icon="✓"
+            title="Your images are ready"
+            message={`${results.length} image${results.length === 1 ? "" : "s"} \u00b7 ${outputFormat.toUpperCase()} \u00b7 ${resolutionDpi} DPI${
+              processingTime !== null ? ` \u00b7 ${(processingTime / 1000).toFixed(2)}s` : ""
+            }`}
+            stats={[
+              { label: "Images", value: results.length },
+              { label: "Format", value: outputFormat.toUpperCase() },
+              { label: "Resolution", value: `${resolutionDpi} DPI` },
+              ...(processingTime !== null
+                ? [{ label: "Processing time", value: `${(processingTime / 1000).toFixed(2)}s` }]
+                : []),
+            ]}
+            onDownload={
+              results.length > 1
+                ? handleDownloadAll
+                : () => {
+                    const [onlyImage] = results;
+                    if (!onlyImage) return;
+                    downloadImageBytes(
+                      onlyImage.bytes,
+                      getPageImageFilename(
+                        selectedFile.name,
+                        onlyImage.pageNumber,
+                        onlyImage.format,
+                      ),
+                      onlyImage.format,
+                    );
+                  }
+            }
+            downloadLabel={
+              results.length > 1
+                ? `Download all ${results.length} images`
+                : "Download image"
+            }
+            onReset={resetState}
+            resetLabel="Convert another PDF"
+          >
+            {results.length > 1 && (
+              <p className="mb-3 text-xs text-gray-500">
+                This downloads {results.length} separate image files one after
+                another — not a single .zip.
+              </p>
+            )}
+
+            <div className="mb-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {results.map((image) => (
+                <div
+                  key={image.pageNumber}
+                  className="flex flex-col rounded-lg border border-gray-200 bg-white p-2"
+                >
+                  <span className="flex h-28 w-full items-center justify-center overflow-hidden rounded bg-gray-50">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={image.previewUrl}
+                      alt={`Page ${image.pageNumber} image preview`}
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  </span>
+                  <p className="mt-2 truncate text-center text-xs font-semibold text-gray-700">
+                    Page {image.pageNumber}
+                  </p>
+                  <p className="text-center text-xs text-gray-500">
+                    {image.width}×{image.height} ·{" "}
+                    {(image.bytes.byteLength / 1024).toFixed(1)} KB
+                  </p>
                   <button
                     type="button"
-                    onClick={handleDownloadAll}
-                    className="text-sm font-medium text-blue-600 hover:text-blue-700"
-                  >
-                    Download all
-                  </button>
-                )}
-              </div>
-
-              <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {results.map((image) => (
-                  <div
-                    key={image.pageNumber}
-                    className="flex flex-col rounded-lg border border-gray-200 bg-gray-50 p-2"
-                  >
-                    <span className="flex h-28 w-full items-center justify-center overflow-hidden rounded bg-white">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={image.previewUrl}
-                        alt={`Page ${image.pageNumber} image preview`}
-                        className="max-h-full max-w-full object-contain"
-                      />
-                    </span>
-                    <p className="mt-2 truncate text-center text-xs font-semibold text-gray-700">
-                      Page {image.pageNumber}
-                    </p>
-                    <p className="text-center text-xs text-gray-500">
-                      {image.width}×{image.height} ·{" "}
-                      {(image.bytes.byteLength / 1024).toFixed(1)} KB
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        downloadImageBytes(
-                          image.bytes,
-                          getPageImageFilename(
-                            selectedFile.name,
-                            image.pageNumber,
-                            image.format,
-                          ),
+                    aria-label={`Download page ${image.pageNumber} image`}
+                    title={`Download page ${image.pageNumber}`}
+                    onClick={() =>
+                      downloadImageBytes(
+                        image.bytes,
+                        getPageImageFilename(
+                          selectedFile.name,
+                          image.pageNumber,
                           image.format,
-                        )
-                      }
-                      className="mt-2 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
-                    >
-                      Download
-                    </button>
-                  </div>
-                ))}
-              </div>
+                        ),
+                        image.format,
+                      )
+                    }
+                    className="mt-2 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
+                  >
+                    Download
+                  </button>
+                </div>
+              ))}
             </div>
-          )}
-        </div>
+          </ResultPanel>
+        )}
       </div>
     </div>
   );
