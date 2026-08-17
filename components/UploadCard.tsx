@@ -8,12 +8,28 @@ import {
   type CompressionResult,
 } from "../services/pdf/compress";
 
-import ResultCard from "./ResultCard";
+import ResultCard, { formatFileSize } from "./ResultCard";
 
-const compressionOptions: { id: CompressionMode; label: string }[] = [
-  { id: "light", label: "Light Compression" },
-  { id: "heavy", label: "Heavy Compression" },
-  { id: "custom", label: "Custom Size" },
+const compressionOptions: {
+  id: CompressionMode;
+  label: string;
+  description: string;
+}[] = [
+  {
+    id: "light",
+    label: "Light Compression",
+    description: "Keeps quality high; reduces size where it's easy to.",
+  },
+  {
+    id: "heavy",
+    label: "Heavy Compression",
+    description: "Prioritizes a smaller file; quality loss may be more visible.",
+  },
+  {
+    id: "custom",
+    label: "Custom Size",
+    description: "Set a target size and DocFlow will try to reach it.",
+  },
 ];
 
 /** Returns true when the file is a PDF (by MIME type or extension). */
@@ -21,13 +37,6 @@ function isPdfFile(file: File): boolean {
   const isPdfMime = file.type === "application/pdf";
   const isPdfExtension = file.name.toLowerCase().endsWith(".pdf");
   return isPdfMime || isPdfExtension;
-}
-
-/** Formats byte size into KB and MB strings for display. */
-function formatFileSize(bytes: number) {
-  const kb = (bytes / 1024).toFixed(2);
-  const mb = (bytes / (1024 * 1024)).toFixed(2);
-  return { kb, mb };
 }
 
 /** Maps compressibility values to user-facing labels. */
@@ -170,11 +179,19 @@ export default function UploadCard() {
     handleFileSelection(e.dataTransfer.files?.[0]);
   };
 
-  const fileSize = selectedFile ? formatFileSize(selectedFile.size) : null;
-
+  const trimmedCustomSize = customSize.trim();
+  const customSizeValue = Number(trimmedCustomSize);
   const isCustomSizeInvalid =
     compressionMode === "custom" &&
-    (customSize.trim() === "" || Number(customSize) <= 0);
+    (trimmedCustomSize === "" ||
+      !Number.isFinite(customSizeValue) ||
+      customSizeValue <= 0);
+  // Only show the inline validation message once the user has typed
+  // something invalid, not while the field is simply still empty.
+  const showCustomSizeError =
+    compressionMode === "custom" &&
+    trimmedCustomSize !== "" &&
+    isCustomSizeInvalid;
 
   const canCompress =
     selectedFile !== null && !isProcessing && !isCustomSizeInvalid;
@@ -204,14 +221,14 @@ export default function UploadCard() {
 
       setSuccessMessage("PDF processed and downloaded successfully.");
     } catch (error) {
-  console.error("PDF compression error:", error);
+      console.error("PDF compression error:", error);
 
-  setError(
-    error instanceof Error
-      ? `Compression failed: ${error.message}`
-      : "Failed to compress the PDF.",
-  );
-} finally {
+      setError(
+        error instanceof Error
+          ? `Compression failed: ${error.message}`
+          : "Failed to compress the PDF.",
+      );
+    } finally {
       isProcessingRef.current = false;
       setIsProcessing(false);
     }
@@ -286,13 +303,13 @@ export default function UploadCard() {
               </p>
             )}
 
-            {selectedFile && fileSize && (
+            {selectedFile && (
               <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3">
                 <p className="text-sm font-medium text-gray-800 truncate">
                   {selectedFile.name}
                 </p>
                 <p className="mt-1 text-sm text-gray-500">
-                  {fileSize.kb} KB · {fileSize.mb} MB
+                  {formatFileSize(selectedFile.size)}
                 </p>
               </div>
             )}
@@ -343,26 +360,65 @@ export default function UploadCard() {
         )}
 
         <div className="px-4 sm:px-6 pb-6">
-          <p className="mb-3 text-sm font-medium text-gray-700">
+          <p
+            className="mb-3 text-sm font-medium text-gray-700"
+            id="compression-level-label"
+          >
             Compression level
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {compressionOptions.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => setCompressionMode(option.id)}
-                disabled={isProcessing}
-                className={`rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
-                  compressionMode === option.id
-                    ? "border-blue-600 bg-blue-600 text-white shadow-sm"
-                    : "border-gray-200 bg-white text-gray-700 hover:border-blue-300 hover:bg-blue-50"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
+          <div
+            role="radiogroup"
+            aria-labelledby="compression-level-label"
+            className="grid grid-cols-1 sm:grid-cols-3 gap-3"
+          >
+            {compressionOptions.map((option) => {
+              const isSelected = compressionMode === option.id;
+
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={isSelected}
+                  onClick={() => setCompressionMode(option.id)}
+                  disabled={isProcessing}
+                  className={`flex flex-col items-start gap-1 rounded-lg border px-4 py-3 text-left transition-colors ${
+                    isSelected
+                      ? "border-blue-600 bg-blue-50 ring-1 ring-blue-600"
+                      : "border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/50"
+                  } ${isProcessing ? "cursor-not-allowed opacity-60" : ""}`}
+                >
+                  <span className="flex w-full items-center justify-between gap-2">
+                    <span
+                      className={`text-sm font-semibold ${
+                        isSelected ? "text-blue-700" : "text-gray-800"
+                      }`}
+                    >
+                      {option.label}
+                    </span>
+                    {isSelected && (
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        className="h-4 w-4 shrink-0 text-blue-600"
+                        aria-hidden="true"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    )}
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {option.description}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           {compressionMode === "custom" && (
@@ -382,8 +438,24 @@ export default function UploadCard() {
                 value={customSize}
                 onChange={(e) => setCustomSize(e.target.value)}
                 disabled={isProcessing}
-                className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                aria-describedby="custom-size-help"
+                aria-invalid={showCustomSizeError || undefined}
+                className={`w-full rounded-lg border px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${
+                  showCustomSizeError
+                    ? "border-red-400 focus:border-red-500"
+                    : "border-gray-300 focus:border-blue-500"
+                }`}
               />
+              <p id="custom-size-help" className="mt-2 text-xs text-gray-500">
+                DocFlow will try to reduce the PDF to this size. It&apos;s a
+                target, not a guarantee — if it can&apos;t be reached, you&apos;ll
+                get the smallest file DocFlow could produce instead.
+              </p>
+              {showCustomSizeError && (
+                <p className="mt-1 text-xs font-medium text-red-600">
+                  Enter a target size greater than 0 MB.
+                </p>
+              )}
             </div>
           )}
 
@@ -391,14 +463,43 @@ export default function UploadCard() {
             type="button"
             onClick={handleCompressPdf}
             disabled={!canCompress}
-            className={`mt-6 w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
+            aria-busy={isProcessing}
+            className={`mt-6 flex w-full items-center justify-center rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
               canCompress
                 ? "bg-blue-600 text-white hover:bg-blue-700"
                 : "bg-gray-200 text-gray-400 cursor-not-allowed"
             }`}
           >
-            {isProcessing ? "Processing PDF..." : "Compress PDF"}
+            {isProcessing && (
+              <svg
+                className="mr-2 h-4 w-4 animate-spin"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
+              </svg>
+            )}
+            {isProcessing ? "Compressing..." : "Compress PDF"}
           </button>
+
+          {isProcessing && (
+            <p className="mt-2 text-center text-xs text-gray-500">
+              Compressing your PDF — this can take a moment for larger files.
+            </p>
+          )}
         </div>
 
         {result && (
@@ -410,6 +511,9 @@ export default function UploadCard() {
             reduction={result.reductionPercent}
             processingTime={result.processingTime}
             mode={result.mode}
+            targetSizeMb={
+              result.mode === "custom" ? Number(customSize) : undefined
+            }
             onDownload={() =>
               downloadPdfBytes(
                 result.bytes,

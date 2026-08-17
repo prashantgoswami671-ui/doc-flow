@@ -6,6 +6,8 @@ interface ResultCardProps {
   reduction: number;
   processingTime: number;
   mode: string;
+  /** Only meaningful when mode === "custom"; the target the user asked for. */
+  targetSizeMb?: number;
   onDownload: () => void;
   onCompressAnother: () => void;
 }
@@ -23,10 +25,51 @@ function formatModeLabel(mode: string): string {
   }
 }
 
-function formatSize(size: number) {
+/**
+ * Formats a byte count with one consistent unit scale (B/KB/MB) used across
+ * the whole Compress PDF experience — both the pre-upload file size and the
+ * post-compression result stats read from this single helper.
+ */
+export function formatFileSize(size: number): string {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(2)} KB`;
   return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/** Below this magnitude a size change isn't meaningfully a "reduction" or an "increase". */
+const NEGLIGIBLE_CHANGE_PERCENT = 1;
+
+/**
+ * Describes the actual measured size change truthfully. A real compression
+ * engine sometimes produces almost no change, or (rarely) a larger file —
+ * this must never be presented as a reduction when it isn't one.
+ */
+function describeReduction(reductionPercent: number): {
+  label: string;
+  value: string;
+  tone: "positive" | "neutral" | "warning";
+} {
+  if (reductionPercent > NEGLIGIBLE_CHANGE_PERCENT) {
+    return {
+      label: "Reduced by",
+      value: `${reductionPercent.toFixed(1)}%`,
+      tone: "positive",
+    };
+  }
+
+  if (reductionPercent < -NEGLIGIBLE_CHANGE_PERCENT) {
+    return {
+      label: "Size increased by",
+      value: `${Math.abs(reductionPercent).toFixed(1)}%`,
+      tone: "warning",
+    };
+  }
+
+  return {
+    label: "Reduction",
+    value: "Not significantly reduced",
+    tone: "neutral",
+  };
 }
 
 export default function ResultCard({
@@ -37,9 +80,17 @@ export default function ResultCard({
   reduction,
   processingTime,
   mode,
+  targetSizeMb,
   onDownload,
   onCompressAnother,
 }: ResultCardProps) {
+  const reductionInfo = describeReduction(reduction);
+  const targetBytes =
+    mode === "custom" && targetSizeMb && Number.isFinite(targetSizeMb)
+      ? targetSizeMb * 1024 * 1024
+      : undefined;
+  const targetMissed = targetBytes !== undefined && processedSize > targetBytes;
+
   return (
     <div className="mt-8 w-full max-w-2xl rounded-2xl border border-gray-200 bg-white p-8 shadow-lg">
       {/* Header */}
@@ -68,17 +119,18 @@ export default function ResultCard({
 
         <Stat
           title="📦 Original Size"
-          value={formatSize(originalSize)}
+          value={formatFileSize(originalSize)}
         />
 
         <Stat
-          title="📦 Processed Size"
-          value={formatSize(processedSize)}
+          title="📦 Compressed Size"
+          value={formatFileSize(processedSize)}
         />
 
         <Stat
-          title="📉 Reduction"
-          value={`${reduction.toFixed(1)} %`}
+          title={`📉 ${reductionInfo.label}`}
+          value={reductionInfo.value}
+          tone={reductionInfo.tone}
         />
 
         <Stat
@@ -87,7 +139,18 @@ export default function ResultCard({
         />
 
         <Stat title="⚙️ Mode" value={formatModeLabel(mode)} />
+
+        {targetBytes !== undefined && (
+          <Stat title="🎯 Target Size" value={formatFileSize(targetBytes)} />
+        )}
       </div>
+
+      {targetMissed && (
+        <p className="mt-4 text-sm font-medium text-amber-600">
+          The target size couldn&apos;t be reached for this file — this is the
+          smallest DocFlow could produce.
+        </p>
+      )}
 
       {/* Download Button */}
       <button
@@ -111,14 +174,22 @@ export default function ResultCard({
 interface StatProps {
   title: string;
   value: string;
+  tone?: "positive" | "neutral" | "warning";
 }
 
-function Stat({ title, value }: StatProps) {
+function Stat({ title, value, tone }: StatProps) {
+  const valueClass =
+    tone === "positive"
+      ? "text-green-700"
+      : tone === "warning"
+        ? "text-amber-600"
+        : "text-gray-900";
+
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
       <p className="text-sm text-gray-500">{title}</p>
 
-      <p className="mt-1 break-all text-lg font-semibold text-gray-900">
+      <p className={`mt-1 break-all text-lg font-semibold ${valueClass}`}>
         {value}
       </p>
     </div>
