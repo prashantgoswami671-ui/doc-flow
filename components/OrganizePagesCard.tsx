@@ -825,18 +825,18 @@ export default function OrganizePagesCard() {
           {error && (
             <p className="mt-4 text-sm font-medium text-red-600">{error}</p>
           )}
-          {successMessage && (
-            <p className="mt-4 text-sm font-medium text-green-600">
-              {successMessage}
-            </p>
-          )}
-
           {pages.length > 0 && (
             <>
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-medium text-gray-700">
                   {pages.length} page{pages.length === 1 ? "" : "s"} ·{" "}
-                  {selectedCount} selected
+                  <span
+                    className={
+                      selectedCount > 0 ? "font-semibold text-blue-700" : ""
+                    }
+                  >
+                    {selectedCount} selected
+                  </span>
                 </p>
                 {selectedCount > 0 && (
                   <button
@@ -854,34 +854,44 @@ export default function OrganizePagesCard() {
                 )}
               </div>
 
-              <div className="mt-3 flex flex-wrap gap-2">
-                {rotationOptions.map((option) => (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap gap-2">
+                  {rotationOptions.map((option) => (
+                    <button
+                      key={option.rotation}
+                      type="button"
+                      onClick={() => rotateSelection(option.rotation)}
+                      disabled={selectedCount === 0 || isProcessing}
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div
+                  aria-hidden="true"
+                  className="hidden h-6 w-px bg-gray-200 sm:block"
+                />
+
+                <div className="flex flex-wrap gap-2">
                   <button
-                    key={option.rotation}
                     type="button"
-                    onClick={() => rotateSelection(option.rotation)}
+                    onClick={() => markSelectedDeleted(true)}
+                    disabled={selectedCount === 0 || isProcessing}
+                    className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
+                  >
+                    Mark for deletion
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => markSelectedDeleted(false)}
                     disabled={selectedCount === 0 || isProcessing}
                     className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
                   >
-                    {option.label}
+                    Keep pages
                   </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => markSelectedDeleted(true)}
-                  disabled={selectedCount === 0 || isProcessing}
-                  className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
-                >
-                  Mark for deletion
-                </button>
-                <button
-                  type="button"
-                  onClick={() => markSelectedDeleted(false)}
-                  disabled={selectedCount === 0 || isProcessing}
-                  className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
-                >
-                  Keep pages
-                </button>
+                </div>
               </div>
 
               <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
@@ -1241,45 +1251,86 @@ export default function OrganizePagesCard() {
             type="button"
             onClick={handleApplyChanges}
             disabled={!canApply}
-            className={`mt-3 w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
+            aria-busy={isProcessing}
+            className={`mt-3 flex w-full items-center justify-center rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
               canApply
                 ? "bg-blue-600 text-white hover:bg-blue-700"
                 : "bg-gray-200 text-gray-400 cursor-not-allowed"
             }`}
           >
+            {isProcessing && (
+              <svg
+                className="mr-2 h-4 w-4 animate-spin"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
+              </svg>
+            )}
             {isProcessing
               ? "Applying all changes..."
               : "Apply All Changes & Download PDF"}
           </button>
 
           {result && (
-            <>
+            <div className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4">
+              <div className="flex items-center gap-3">
+                <span
+                  aria-hidden="true"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-100 text-base font-semibold text-green-700"
+                >
+                  ✓
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">
+                    Changes applied
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    {successMessage ??
+                      "Your PDF has been updated and downloaded."}
+                  </p>
+                </div>
+              </div>
+
               <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-3">
-                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
                   <p className="text-xs text-gray-500">Original pages</p>
                   <p className="mt-0.5 text-sm font-semibold text-gray-800">
                     {result.originalPageCount}
                   </p>
                 </div>
-                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
                   <p className="text-xs text-gray-500">Deleted</p>
                   <p className="mt-0.5 text-sm font-semibold text-gray-800">
                     {result.deletedPageCount}
                   </p>
                 </div>
-                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
                   <p className="text-xs text-gray-500">Rotated</p>
                   <p className="mt-0.5 text-sm font-semibold text-gray-800">
                     {result.rotatedPageCount}
                   </p>
                 </div>
-                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
                   <p className="text-xs text-gray-500">Cropped</p>
                   <p className="mt-0.5 text-sm font-semibold text-gray-800">
                     {result.croppedPageCount}
                   </p>
                 </div>
-                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
                   <p className="text-xs text-gray-500">Remaining</p>
                   <p className="mt-0.5 text-sm font-semibold text-gray-800">
                     {result.remainingPageCount}
@@ -1287,7 +1338,7 @@ export default function OrganizePagesCard() {
                 </div>
               </div>
 
-              <p className="mt-2 text-sm text-gray-500">
+              <p className="mt-2 text-sm text-gray-600">
                 {result.reordered ? "Pages reordered · " : ""}Completed in{" "}
                 {(result.processingTime / 1000).toFixed(2)}s.
               </p>
@@ -1312,7 +1363,7 @@ export default function OrganizePagesCard() {
               >
                 Organize another PDF
               </button>
-            </>
+            </div>
           )}
         </div>
       </div>
