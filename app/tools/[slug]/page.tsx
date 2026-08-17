@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import AppShell from "../../../components/AppShell";
+import ToolPageShell from "../../../components/tools/ToolPageShell";
 import { TOOL_COMPONENTS } from "../../../components/tools/toolRegistry";
 import { getToolBySlug, TOOL_CATALOG } from "../../../lib/toolCatalog";
 
@@ -54,25 +54,9 @@ export default async function ToolPage(props: ToolPageProps) {
 
   return (
     <AppShell>
-      <section className="pb-20 pt-12">
-        <div className="mx-auto max-w-2xl px-4 sm:px-6">
-          <Link
-            href="/"
-            className="text-sm font-medium text-blue-600 hover:text-blue-700"
-          >
-            ← Back to all tools
-          </Link>
-
-          <h1 className="mt-4 text-2xl font-bold tracking-tight text-gray-900">
-            {tool.name}
-          </h1>
-          <p className="mt-2 text-sm text-gray-600">{tool.description}</p>
-        </div>
-
-        <div className="mt-10">
-          <ToolComponent />
-        </div>
-      </section>
+      <ToolPageShell tool={tool}>
+        <ToolComponent />
+      </ToolPageShell>
     </AppShell>
   );
 }
