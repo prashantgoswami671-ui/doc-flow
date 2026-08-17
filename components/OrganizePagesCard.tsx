@@ -190,6 +190,9 @@ export default function OrganizePagesCard() {
   useEffect(() => {
     pagesRef.current = pages;
   }, [pages]);
+  // Snapshot of `pages` immediately after previews finish loading, so
+  // "Reset" can restore the original page state/order without re-uploading.
+  const initialPagesRef = useRef<ManagedPage[]>([]);
   const editorRequestIdRef = useRef(0);
   const pageContentRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef<DragState | null>(null);
@@ -252,6 +255,7 @@ export default function OrganizePagesCard() {
       if (requestId !== previewRequestIdRef.current) return;
 
       const managedPages = createManagedPages(thumbnails);
+      initialPagesRef.current = managedPages;
       setPages(managedPages);
     } catch (previewError) {
       console.error("PDF page preview error:", previewError);
@@ -336,6 +340,19 @@ export default function OrganizePagesCard() {
 
   const reorder = (fromIndex: number, toIndex: number) => {
     setPages((current) => movePage(current, fromIndex, toIndex));
+  };
+
+  /**
+   * Reverts all pending edits (selection, deletions, rotation, crop, and
+   * order) back to how the PDF was originally loaded, without re-uploading
+   * it. Does not touch the uploaded file itself.
+   */
+  const resetToOriginal = () => {
+    setPages(initialPagesRef.current.map((page) => ({ ...page })));
+    resetEditorState();
+    setResult(null);
+    setError(null);
+    setSuccessMessage(null);
   };
 
   // --- Single-page editor: load the unrotated preview whenever the edited
@@ -818,7 +835,8 @@ export default function OrganizePagesCard() {
             <>
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-medium text-gray-700">
-                  {selectedCount} page{selectedCount === 1 ? "" : "s"} selected
+                  {pages.length} page{pages.length === 1 ? "" : "s"} ·{" "}
+                  {selectedCount} selected
                 </p>
                 {selectedCount > 0 && (
                   <button
@@ -866,7 +884,7 @@ export default function OrganizePagesCard() {
                 </button>
               </div>
 
-              <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
                 {pages.map((page, index) => {
                   const isDropTarget =
                     dropTargetIndex === index && draggedIndex !== index;
@@ -1208,11 +1226,22 @@ export default function OrganizePagesCard() {
             </>
           )}
 
+          {pages.length > 0 && (
+            <button
+              type="button"
+              onClick={resetToOriginal}
+              disabled={!hasChanges || isProcessing}
+              className="mt-6 w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400"
+            >
+              Reset
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleApplyChanges}
             disabled={!canApply}
-            className={`mt-6 w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
+            className={`mt-3 w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
               canApply
                 ? "bg-blue-600 text-white hover:bg-blue-700"
                 : "bg-gray-200 text-gray-400 cursor-not-allowed"
