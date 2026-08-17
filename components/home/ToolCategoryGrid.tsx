@@ -1,50 +1,26 @@
 import ToolCategoryCard from "./ToolCategoryCard";
+import {
+  TOOL_CATEGORY_ORDER,
+  TOOL_CATEGORY_LABELS,
+  TOOL_CATEGORY_DESCRIPTIONS,
+  getToolsByCategory,
+} from "../../lib/toolCatalog";
 
 /**
- * DocFlow's five workflow categories. Mirrors TopBar's NAV_ITEMS and the
- * section ids rendered in app/page.tsx — every tool listed here must exist
- * in the repository (see the corresponding *Card component).
+ * DocFlow's five workflow categories, derived from the tool catalog
+ * (lib/toolCatalog.ts) so category labels, descriptions, and tool
+ * names/slugs are defined in exactly one place. Category ids mirror
+ * TopBar's NAV_ITEMS and the section ids rendered in app/page.tsx.
  */
-const CATEGORIES = [
-  {
-    name: "Organize",
-    description:
-      "Shape your document. Delete, rotate, reorder, extract, split, and insert pages.",
-    tools: ["Organize Pages", "Extract Pages", "Split PDF", "Insert Pages"],
-    href: "#organize",
-  },
-  {
-    name: "Create",
-    description: "Build new documents. Merge PDFs and turn images into PDFs.",
-    tools: ["Merge PDF", "Image to PDF"],
-    href: "#create",
-  },
-  {
-    name: "Convert",
-    description: "Move between formats. Convert PDF pages into images.",
-    tools: ["PDF to Image"],
-    href: "#convert",
-  },
-  {
-    name: "Enhance",
-    description:
-      "Improve document quality. Compress, repair, validate, fix orientation, and add finishing touches.",
-    tools: [
-      "Compress PDF",
-      "Fix Page Orientation",
-      "Repair & Validate PDF",
-      "Edit Metadata",
-      "Watermark & Page Numbers",
-    ],
-    href: "#enhance",
-  },
-  {
-    name: "Protect",
-    description: "Control document access. Password-protect and unlock PDFs.",
-    tools: ["Protect PDF", "Unlock PDF"],
-    href: "#protect",
-  },
-] as const;
+const CATEGORIES = TOOL_CATEGORY_ORDER.map((category) => ({
+  name: TOOL_CATEGORY_LABELS[category],
+  description: TOOL_CATEGORY_DESCRIPTIONS[category],
+  tools: getToolsByCategory(category).map((tool) => ({
+    slug: tool.slug,
+    name: tool.name,
+  })),
+  href: `#${category}`,
+}));
 
 /**
  * DocFlow's workflow information architecture. Presentation/navigation
