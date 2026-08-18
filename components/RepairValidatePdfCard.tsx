@@ -13,6 +13,8 @@ import {
   type RepairStage,
   type StrategyDiagnostics,
 } from "../services/pdf/repairValidate";
+import ResultPanel from "./ResultPanel";
+import ProcessingState from "./ProcessingState";
 
 function isPdfFile(file: File): boolean {
   return (
@@ -54,7 +56,7 @@ function getStatusLabel(status: PdfValidationResult["status"]): {
   if (status === "repairable") {
     return {
       icon: "⚠",
-      text: "PDF has recoverable issues",
+      text: "PDF needs repair",
       colorClass: "text-amber-700",
     };
   }
@@ -64,6 +66,31 @@ function getStatusLabel(status: PdfValidationResult["status"]): {
     text: "PDF could not be processed",
     colorClass: "text-red-700",
   };
+}
+
+/**
+ * Derives a single, user-facing explanation of *why* a "repairable" PDF is
+ * being flagged, from facts the validation result already computed. This
+ * does not introduce any new validation rule or threshold — it only
+ * decides which already-known fact is most relevant to show first. The
+ * `pdfJsLoadable`/`pdfLibLoadable` case mirrors the explanatory note the
+ * card already surfaced inline; the issue-message fallback reuses the
+ * existing `issues` list the service produces.
+ */
+function repairReasonExplanation(validationResult: PdfValidationResult): string {
+  if (!validationResult.pdfJsLoadable && validationResult.pdfLibLoadable) {
+    return "PDF structure can still be read, but page rendering could not be verified. A repair attempt is available.";
+  }
+
+  const primaryIssue = validationResult.issues.find(
+    (issue) => issue.severity !== "info",
+  );
+
+  if (primaryIssue) {
+    return primaryIssue.message;
+  }
+
+  return "DocFlow detected recoverable issues in this PDF's structure.";
 }
 
 function issueExplanation(code: string): string {
@@ -235,6 +262,35 @@ function StrategyDiagnosticsPanel({
   );
 }
 
+/**
+ * Small, local icon-circle badge shared by every status/state block in this
+ * card (valid, repairable, invalid, raster-salvage prompt, repair failure)
+ * so they read as visually related to the ResultPanel-driven success state
+ * further down. Presentation-only; carries no validation/repair meaning.
+ */
+function StatusIconCircle({
+  icon,
+  tone,
+}: {
+  icon: string;
+  tone: "green" | "amber" | "red";
+}) {
+  const toneClasses: Record<typeof tone, string> = {
+    green: "bg-green-100 text-green-700",
+    amber: "bg-amber-100 text-amber-700",
+    red: "bg-red-100 text-red-700",
+  };
+
+  return (
+    <div
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xl ${toneClasses[tone]}`}
+      aria-hidden="true"
+    >
+      {icon}
+    </div>
+  );
+}
+
 export default function RepairValidatePdfCard() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const validationRequestIdRef = useRef(0);
@@ -364,6 +420,30 @@ export default function RepairValidatePdfCard() {
     }
   };
 
+  /**
+   * Full workflow reset for the "Validate another PDF" action. Reuses the
+   * existing `resetOutput` helper (the same output-clearing logic the card
+   * already ran on file re-selection) instead of introducing a second,
+   * parallel reset implementation, and additionally clears the selected
+   * file / in-flight validation and repair bookkeeping so a new file can be
+   * picked immediately.
+   */
+  const handleValidateAnother = () => {
+    validationRequestIdRef.current += 1;
+    isRepairingRef.current = false;
+
+    setSelectedFile(null);
+    setIsDragging(false);
+    setIsValidating(false);
+    setIsRepairing(false);
+    setRepairStage(null);
+    resetOutput();
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
   const canRepair =
     selectedFile !== null &&
     validationResult !== null &&
@@ -373,6 +453,9 @@ export default function RepairValidatePdfCard() {
 
   const status = validationResult ? getStatusLabel(validationResult.status) : null;
   const currentStageLabel = stageLabel(repairStage);
+  const isValidState = validationResult?.status === "valid";
+  const isRepairableState = validationResult?.status === "repairable";
+  const isInvalidState = validationResult?.status === "invalid";
 
   return (
     <div className="w-full max-w-2xl mx-auto px-4 sm:px-6">
@@ -440,28 +523,94 @@ export default function RepairValidatePdfCard() {
           )}
 
           {isValidating && (
-            <p className="mt-4 text-sm font-medium text-gray-600">Validating PDF...</p>
+            <p
+              className="mt-4 text-sm font-medium text-gray-600"
+              role="status"
+              aria-live="polite"
+            >
+              <ProcessingState isProcessing={isValidating} message="Validating PDF..." />
+            </p>
           )}
 
-          {validationResult && status && (
-            <div className="mt-4 space-y-2 rounded-lg border border-gray-200 bg-white p-4">
-              <p className={`text-sm font-semibold ${status.colorClass}`}>
-                {status.icon} {status.text}
-              </p>
-              <p className="text-sm text-gray-600">
-                Page count: {validationResult.pageCount ?? "Unavailable"}
-              </p>
-              <p className="text-sm text-gray-600">
-                Renderable pages checked: {validationResult.renderablePages}
-              </p>
-              <p className="text-sm text-gray-600">
-                PDF.js load: {validationResult.pdfJsLoadable ? "Yes" : "No"} · pdf-lib parse: {validationResult.pdfLibLoadable ? "Yes" : "No"}
-              </p>
-              {!validationResult.pdfJsLoadable && validationResult.pdfLibLoadable && (
-                <p className="text-sm text-amber-700">
-                  PDF structure can still be read, but page rendering could not be verified. A repair attempt is available.
-                </p>
-              )}
+          {/* --- A1: valid state --- */}
+          {validationResult && status && isValidState && (
+            <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-4">
+              <div className="flex items-start gap-3">
+                <StatusIconCircle icon="✓" tone="green" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-green-800">PDF appears healthy</p>
+                  <p className="mt-1 text-sm text-green-700">
+                    No repair is needed. This PDF loads and renders normally.
+                  </p>
+                  <p className="mt-2 text-sm font-medium text-gray-800">
+                    Page count: {validationResult.pageCount ?? "Unavailable"}
+                  </p>
+                </div>
+              </div>
+
+              <details className="mt-3 rounded-lg border border-green-200 bg-white">
+                <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-gray-500">
+                  Technical details
+                </summary>
+                <div className="space-y-1 px-3 pb-3 text-xs text-gray-600">
+                  <p>Renderable pages checked: {validationResult.renderablePages}</p>
+                  <p>
+                    PDF.js load: {validationResult.pdfJsLoadable ? "Yes" : "No"} · pdf-lib parse:{" "}
+                    {validationResult.pdfLibLoadable ? "Yes" : "No"}
+                  </p>
+                </div>
+              </details>
+            </div>
+          )}
+
+          {/* --- A2: repairable state --- */}
+          {validationResult && status && isRepairableState && (
+            <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-4">
+              <div className="flex items-start gap-3">
+                <StatusIconCircle icon="⚠" tone="amber" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-amber-800">PDF needs repair</p>
+                  <p className="mt-1 text-sm text-amber-800">
+                    {repairReasonExplanation(validationResult)}
+                  </p>
+                  <p className="mt-2 text-sm font-medium text-gray-800">
+                    Page count: {validationResult.pageCount ?? "Unavailable"}
+                  </p>
+                </div>
+              </div>
+
+              <details className="mt-3 rounded-lg border border-amber-200 bg-white">
+                <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-gray-500">
+                  Technical details
+                </summary>
+                <div className="space-y-1 px-3 pb-3 text-xs text-gray-600">
+                  <p>Renderable pages checked: {validationResult.renderablePages}</p>
+                  <p>
+                    PDF.js load: {validationResult.pdfJsLoadable ? "Yes" : "No"} · pdf-lib parse:{" "}
+                    {validationResult.pdfLibLoadable ? "Yes" : "No"}
+                  </p>
+                </div>
+              </details>
+            </div>
+          )}
+
+          {/* --- A3: invalid state --- */}
+          {validationResult && status && isInvalidState && (
+            <div
+              className="mt-4 rounded-lg border border-red-300 bg-red-50 p-4"
+              role="alert"
+            >
+              <div className="flex items-start gap-3">
+                <StatusIconCircle icon="✕" tone="red" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-red-800">
+                    PDF could not be processed
+                  </p>
+                  <p className="mt-1 text-sm text-red-700">
+                    Unable to repair this PDF in the browser.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 
@@ -483,28 +632,40 @@ export default function RepairValidatePdfCard() {
             </div>
           )}
 
-          {validationResult?.status === "valid" && (
-            <p className="mt-4 text-sm font-medium text-green-700">PDF is healthy.</p>
-          )}
-
-          {validationResult?.status === "invalid" && (
-            <p className="mt-4 text-sm font-medium text-red-700">
-              Unable to repair this PDF in the browser.
+          {isRepairing && (
+            <p
+              className="mt-4 text-sm font-medium text-gray-600"
+              role="status"
+              aria-live="polite"
+            >
+              <ProcessingState
+                isProcessing={isRepairing}
+                message="Repairing PDF..."
+                stage={
+                  repairStage
+                    ? { id: repairStage, label: currentStageLabel ?? "Repairing PDF..." }
+                    : null
+                }
+              />
             </p>
           )}
 
-          {isRepairing && currentStageLabel && (
-            <p className="mt-4 text-sm font-medium text-gray-600">{currentStageLabel}</p>
-          )}
-
+          {/* --- D: raster-salvage confirmation (not an error, not a result) --- */}
           {showRasterSalvagePrompt && (
-            <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              <p className="font-semibold">Lossy salvage required</p>
-              <p className="mt-1">
-                This PDF could not be structurally rebuilt. It can still be salvaged by rebuilding
-                pages as images, but text may no longer be selectable and vector/form/annotation
-                data may be lost.
-              </p>
+            <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-4">
+              <div className="flex items-start gap-3">
+                <StatusIconCircle icon="⚠" tone="amber" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-amber-800">
+                    Lossy image-based recovery needed
+                  </p>
+                  <p className="mt-1 text-sm text-amber-800">
+                    This PDF could not be structurally rebuilt. It can still be salvaged by
+                    rebuilding pages as images, but text may no longer be selectable and
+                    vector/form/annotation data may be lost.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 
@@ -512,19 +673,28 @@ export default function RepairValidatePdfCard() {
             <StrategyDiagnosticsPanel diagnostics={repairDiagnostics} />
           )}
 
+          {/* --- E: repair failure --- */}
           {repairFailed && (
-            <div className="mt-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-              <p className="font-semibold">✕ Safe repair unavailable</p>
-              <p className="mt-1">
-                This PDF is too severely damaged for DocFlow&apos;s current browser-based recovery
-                methods.
-              </p>
-              {validationResult && !validationResult.pdfJsLoadable && (
-                <p className="mt-1">
-                  Image-based (raster) salvage was not available either, because the original PDF
-                  could not be rendered by the browser&apos;s PDF viewer.
-                </p>
-              )}
+            <div
+              className="mt-4 rounded-lg border border-red-300 bg-red-50 p-4"
+              role="alert"
+            >
+              <div className="flex items-start gap-3">
+                <StatusIconCircle icon="✕" tone="red" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-red-800">Safe repair unavailable</p>
+                  <p className="mt-1 text-sm text-red-700">
+                    This PDF is too severely damaged for DocFlow&apos;s current browser-based
+                    recovery methods.
+                  </p>
+                  {validationResult && !validationResult.pdfJsLoadable && (
+                    <p className="mt-1 text-sm text-red-700">
+                      Image-based (raster) salvage was not available either, because the original
+                      PDF could not be rendered by the browser&apos;s PDF viewer.
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -532,8 +702,17 @@ export default function RepairValidatePdfCard() {
             <StrategyDiagnosticsPanel diagnostics={repairDiagnostics} />
           )}
 
+          {/* --- F: generic errors --- */}
           {error && !repairFailed && (
-            <p className="mt-4 text-sm font-medium text-red-600">{error}</p>
+            <div
+              className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4"
+              role="alert"
+            >
+              <div className="flex items-start gap-3">
+                <StatusIconCircle icon="✕" tone="red" />
+                <p className="text-sm font-medium text-red-700">{error}</p>
+              </div>
+            </div>
           )}
 
           {validationResult && validationResult.status !== "invalid" && (
@@ -542,15 +721,18 @@ export default function RepairValidatePdfCard() {
               onClick={() => void runRepair(false)}
               disabled={!canRepair}
               className={`mt-6 w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
-                canRepair
-                  ? "bg-blue-600 text-white hover:bg-blue-700"
-                  : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                !canRepair
+                  ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                  : isValidState
+                    ? "border border-blue-300 bg-white text-blue-700 hover:bg-blue-50"
+                    : "bg-blue-600 text-white hover:bg-blue-700"
               }`}
+              aria-busy={isRepairing}
             >
               {isRepairing
                 ? currentStageLabel ?? "Repairing PDF..."
-                : validationResult.status === "valid"
-                  ? "Rebuild / Sanitize PDF"
+                : isValidState
+                  ? "Rebuild / Sanitize PDF (optional)"
                   : "Repair PDF"}
             </button>
           )}
@@ -565,6 +747,7 @@ export default function RepairValidatePdfCard() {
                   ? "bg-gray-200 text-gray-400 cursor-not-allowed"
                   : "bg-amber-600 text-white hover:bg-amber-700"
               }`}
+              aria-busy={isRepairing}
             >
               {isRepairing ? currentStageLabel ?? "Rebuilding pages as images..." : "Continue with image-based repair"}
             </button>
@@ -572,29 +755,35 @@ export default function RepairValidatePdfCard() {
         </div>
 
         {repairResult && selectedFile && (
-          <div className="border-t border-gray-100 bg-gray-50 px-4 sm:px-6 py-6">
-            <div className="mb-4 flex items-start gap-3">
-              <div
-                className={`flex h-10 w-10 items-center justify-center rounded-full text-xl ${
-                  repairResult.lossy ? "bg-amber-100" : "bg-green-100"
-                }`}
-              >
-                {repairResult.lossy ? "⚠" : "✓"}
-              </div>
-              <div>
-                <p className="text-base font-semibold text-gray-900">
-                  {repairResultHeading(repairResult)}
-                </p>
-                <p className="text-sm text-gray-600">Method: {methodLabel(repairResult.method)}</p>
-                <p className="text-sm text-gray-600">
-                  {repairResultPagesLabel(repairResult)}: {repairResult.pagesVerified} / {repairResult.pageCount}
-                </p>
-                {repairResultStructurePreserved(repairResult) && (
-                  <p className="text-sm font-medium text-green-700">Structure preserved</p>
-                )}
-              </div>
-            </div>
-
+          <ResultPanel
+            icon={repairResult.lossy ? "⚠" : "✓"}
+            title={repairResultHeading(repairResult)}
+            message={
+              repairResultStructurePreserved(repairResult)
+                ? "Structure preserved — all pages retain their original vector/text content."
+                : undefined
+            }
+            stats={[
+              { label: "Method", value: methodLabel(repairResult.method) },
+              {
+                label: repairResultPagesLabel(repairResult),
+                value: `${repairResult.pagesVerified} / ${repairResult.pageCount}`,
+              },
+              { label: "Original size", value: formatBytes(repairResult.originalSize) },
+              { label: "Repaired size", value: formatBytes(repairResult.repairedSize) },
+              { label: "Page count", value: repairResult.pageCount },
+              { label: "Output validation", value: "Passed" },
+            ]}
+            onDownload={() =>
+              downloadPdfBytes(
+                repairResult.bytes,
+                getRepairedFilename(selectedFile.name),
+              )
+            }
+            downloadLabel="Download Repaired PDF"
+            onReset={handleValidateAnother}
+            resetLabel="Validate another PDF"
+          >
             {repairResult.warnings.length > 0 && (
               <div className="mb-4 space-y-2">
                 {repairResult.warnings.map((warning, index) => (
@@ -608,28 +797,8 @@ export default function RepairValidatePdfCard() {
               </div>
             )}
 
-            <div className="mb-4 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700">
-              <p>Original size: {formatBytes(repairResult.originalSize)}</p>
-              <p>Repaired size: {formatBytes(repairResult.repairedSize)}</p>
-              <p>Page count: {repairResult.pageCount}</p>
-              <p>Output validation: Passed</p>
-            </div>
-
             <StrategyDiagnosticsPanel diagnostics={repairDiagnostics} />
-
-            <button
-              type="button"
-              onClick={() =>
-                downloadPdfBytes(
-                  repairResult.bytes,
-                  getRepairedFilename(selectedFile.name),
-                )
-              }
-              className="w-full rounded-xl bg-blue-600 py-3 text-base font-semibold text-white transition hover:bg-blue-700"
-            >
-              Download Repaired PDF
-            </button>
-          </div>
+          </ResultPanel>
         )}
       </div>
     </div>
