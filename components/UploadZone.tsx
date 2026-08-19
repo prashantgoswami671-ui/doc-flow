@@ -55,15 +55,20 @@ export default function UploadZone({
         role="button"
         tabIndex={0}
         aria-disabled={disabled || undefined}
-        onClick={openFilePicker}
+        onClick={() => {
+          if (disabled) return;
+          openFilePicker();
+        }}
         onKeyDown={(event) => {
+          if (disabled) return;
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
             openFilePicker();
           }
         }}
         onDragEnter={() => {
-          if (!disabled) setIsDragging(true);
+          if (disabled) return;
+          setIsDragging(true);
         }}
         onDragLeave={() => setIsDragging(false)}
         onDragOver={(event) => event.preventDefault()}
@@ -73,19 +78,33 @@ export default function UploadZone({
           if (disabled) return;
           onFileSelect(event.dataTransfer.files?.[0]);
         }}
-        className={`${className} flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors cursor-pointer ${
-          isDragging
-            ? "border-blue-500 bg-blue-50"
-            : "border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
+        className={`${className} flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors outline-none ${
+          disabled
+            ? "cursor-not-allowed border-gray-200 bg-gray-50"
+            : `cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
+                isDragging
+                  ? "border-blue-500 bg-blue-50"
+                  : "border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
+              }`
         }`}
       >
         {title && (
-          <p className="text-base font-medium text-gray-800 text-center">
+          <p
+            className={`text-base font-medium text-center ${
+              disabled ? "text-gray-400" : "text-gray-800"
+            }`}
+          >
             {title}
           </p>
         )}
         {helperText && (
-          <p className="mt-1 text-sm text-gray-500">{helperText}</p>
+          <p
+            className={`mt-1 text-sm ${
+              disabled ? "text-gray-400" : "text-gray-500"
+            }`}
+          >
+            {helperText}
+          </p>
         )}
       </div>
     </>
