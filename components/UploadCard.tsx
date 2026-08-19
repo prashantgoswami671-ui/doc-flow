@@ -179,8 +179,9 @@ export default function UploadCard() {
     }
   };
 
-  /** Opens the hidden file picker when the drop zone is clicked. */
+  /** Opens the hidden file picker when the drop zone is clicked. Locked while a compression is running. */
   const openFilePicker = () => {
+    if (isProcessing) return;
     fileInputRef.current?.click();
   };
 
@@ -191,10 +192,13 @@ export default function UploadCard() {
     e.target.value = "";
   };
 
-  /** Accepts a file dropped onto the upload area. */
+  /** Accepts a file dropped onto the upload area. Dropped files are ignored while compression is running. */
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
+
+    if (isProcessing) return;
+
     handleFileSelection(e.dataTransfer.files?.[0]);
   };
 
@@ -268,24 +272,39 @@ export default function UploadCard() {
         <div
           role="button"
           tabIndex={0}
+          aria-disabled={isProcessing}
           onClick={openFilePicker}
           onKeyDown={(e) => {
+            if (isProcessing) return;
+
             if (e.key === "Enter" || e.key === " ") {
               e.preventDefault();
               openFilePicker();
             }
           }}
-          className={`mx-4 sm:mx-6 mt-6 sm:mt-8 mb-6 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-12 sm:py-16 transition-colors cursor-pointer ${
-            isDragging
-              ? "border-blue-500 bg-blue-50"
-              : "border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
+          className={`mx-4 sm:mx-6 mt-6 sm:mt-8 mb-6 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-12 sm:py-16 transition-colors ${
+            isProcessing
+              ? "cursor-not-allowed border-gray-200 bg-gray-100"
+              : `cursor-pointer ${
+                  isDragging
+                    ? "border-blue-500 bg-blue-50"
+                    : "border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
+                }`
           }`}
-          onDragEnter={() => setIsDragging(true)}
+          onDragEnter={() => {
+            if (!isProcessing) setIsDragging(true);
+          }}
           onDragLeave={() => setIsDragging(false)}
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
         >
-          <div className="flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-blue-100 text-blue-600">
+          <div
+            className={`flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-full ${
+              isProcessing
+                ? "bg-gray-200 text-gray-400"
+                : "bg-blue-100 text-blue-600"
+            }`}
+          >
             <svg
               xmlns="http://www.w3.org/2000/svg"
               fill="none"
@@ -303,17 +322,27 @@ export default function UploadCard() {
             </svg>
           </div>
 
-          <p className="mt-4 text-base sm:text-lg font-medium text-gray-800 text-center">
-            Drag &amp; Drop your PDF here
+          <p
+            className={`mt-4 text-base sm:text-lg font-medium text-center ${
+              isProcessing ? "text-gray-400" : "text-gray-800"
+            }`}
+          >
+            {isProcessing
+              ? "Upload locked while your PDF is being compressed"
+              : "Drag & Drop your PDF here"}
           </p>
-          <p className="mt-1 text-sm text-gray-500">or click to browse</p>
+          <p className="mt-1 text-sm text-gray-500">
+            {isProcessing ? "Please wait for the current file to finish." : "or click to browse"}
+          </p>
         </div>
 
         {/* File details, validation error, or success message */}
         {(selectedFile || error || successMessage) && (
           <div className="mx-4 sm:mx-6 -mt-2 mb-4">
             {error && (
-              <p className="text-sm text-red-600 font-medium">{error}</p>
+              <p role="alert" className="text-sm text-red-600 font-medium">
+                {error}
+              </p>
             )}
 
             {successMessage && (
@@ -522,12 +551,13 @@ export default function UploadCard() {
                 />
               </svg>
             )}
-            {isProcessing ? "Compressing..." : "Compress PDF"}
+            {isProcessing ? "Compressing PDF..." : "Compress PDF"}
           </button>
 
           {isProcessing && (
             <p className="mt-2 text-center text-xs text-gray-500">
-              Compressing your PDF — this can take a moment for larger files.
+              Compressing your PDF — this may take a moment. Your options are
+              locked until it finishes.
             </p>
           )}
         </div>
