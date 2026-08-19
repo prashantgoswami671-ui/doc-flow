@@ -5,6 +5,7 @@ import {
   applyImageFilter,
   FILTER_PRESETS,
   isImageFile,
+  PREVIEW_MAX_DIMENSION,
   type FilterPreset,
   type ProcessedImage,
 } from "../services/imageFilters";
@@ -15,6 +16,8 @@ import {
   type OrientationOption,
   type PageSizeOption,
 } from "../services/pdf/imageToPdf";
+import ResultPanel from "./ResultPanel";
+import { formatFileSize } from "./ResultCard";
 
 interface QueuedImage {
   id: string;
@@ -30,6 +33,14 @@ interface QueuedImage {
   isPreviewLoading: boolean;
   previewError: string | null;
 }
+
+/** Filename used for the downloaded PDF, shared between the generate action and the result card. */
+const OUTPUT_FILENAME = "images.pdf";
+
+const DEFAULT_FILTER: FilterPreset = "original";
+const DEFAULT_PAGE_SIZE: PageSizeOption = "a4";
+const DEFAULT_ORIENTATION: OrientationOption = "auto";
+const DEFAULT_FIT_MODE: FitModeOption = "fit";
 
 function downloadPdfBytes(bytes: Uint8Array, filename: string): void {
   const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
@@ -79,6 +90,24 @@ const FIT_MODE_OPTIONS: { value: FitModeOption; label: string }[] = [
   { value: "original", label: "Original size" },
 ];
 
+function CheckIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      className="h-4 w-4 shrink-0"
+      aria-hidden="true"
+    >
+      <path
+        fillRule="evenodd"
+        d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
 let nextQueuedImageId = 0;
 
 export default function ImageToPdfCard() {
@@ -89,19 +118,22 @@ export default function ImageToPdfCard() {
   const [queuedImages, setQueuedImages] = useState<QueuedImage[]>([]);
   const [isDragging, setIsDragging] = useState(false);
 
-  const [filterPreset, setFilterPreset] = useState<FilterPreset>("original");
-  const [pageSize, setPageSize] = useState<PageSizeOption>("a4");
-  const [orientation, setOrientation] = useState<OrientationOption>("auto");
-  const [fitMode, setFitMode] = useState<FitModeOption>("fit");
+  const [filterPreset, setFilterPreset] = useState<FilterPreset>(DEFAULT_FILTER);
+  const [pageSize, setPageSize] = useState<PageSizeOption>(DEFAULT_PAGE_SIZE);
+  const [orientation, setOrientation] = useState<OrientationOption>(DEFAULT_ORIENTATION);
+  const [fitMode, setFitMode] = useState<FitModeOption>(DEFAULT_FIT_MODE);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [result, setResult] = useState<ImageToPdfResult | null>(null);
 
   // Index into `queuedImages` for the click-to-preview lightbox, or `null`
   // when the modal is closed.
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+
+  // While generating, the queue, filter, and settings must stay frozen so
+  // the output PDF can't change out from under an in-flight request.
+  const uploadDisabled = isProcessing;
 
   // Keep a ref mirror of the queue so async preview generation and the
   // unmount cleanup effect always see the latest queue without needing
@@ -182,7 +214,16 @@ export default function ImageToPdfCard() {
         }
 
         try {
-          const processed = await applyImageFilter(target.file, filterPreset);
+          // Downscaled to PREVIEW_MAX_DIMENSION: the preview only ever
+          // displays at thumbnail/lightbox size, so there's no need to
+          // filter the full-resolution photo just to show it. Final PDF
+          // generation (below, in handleGenerate) calls applyImageFilter
+          // with no size cap, so it always uses the full-resolution image.
+          const processed = await applyImageFilter(
+            target.file,
+            filterPreset,
+            PREVIEW_MAX_DIMENSION,
+          );
 
           if (cancelled) return;
 
@@ -272,12 +313,11 @@ export default function ImageToPdfCard() {
 
   const resetOutput = () => {
     setResult(null);
-    setSuccessMessage(null);
     setError(null);
   };
 
   const addFiles = (fileList: FileList | File[] | null | undefined) => {
-    if (!fileList) return;
+    if (uploadDisabled || !fileList) return;
 
     const incoming = Array.from(fileList);
     const invalid = incoming.find((file) => !isImageFile(file));
@@ -350,7 +390,6 @@ export default function ImageToPdfCard() {
     isProcessingRef.current = true;
     setIsProcessing(true);
     setError(null);
-    setSuccessMessage(null);
 
     try {
       // Filters are applied here, once per generate click — never on every
@@ -371,10 +410,7 @@ export default function ImageToPdfCard() {
       });
 
       setResult(pdfResult);
-      downloadPdfBytes(pdfResult.bytes, "images.pdf");
-      setSuccessMessage(
-        `Created a ${pdfResult.imageCount}-page PDF and downloaded it.`,
-      );
+      downloadPdfBytes(pdfResult.bytes, OUTPUT_FILENAME);
     } catch (generateError) {
       console.error("Image to PDF error:", generateError);
       setError(
@@ -388,11 +424,43 @@ export default function ImageToPdfCard() {
     }
   };
 
+  /** Clears the queue, settings, and result — revoking every remaining object URL — so the user can start a fresh conversion. */
+  const handleConvertAnother = () => {
+    for (const entry of queuedImages) {
+      URL.revokeObjectURL(entry.originalUrl);
+      if (entry.generatedUrl) {
+        URL.revokeObjectURL(entry.generatedUrl);
+      }
+    }
+
+    setQueuedImages([]);
+    setPreviewIndex(null);
+    setFilterPreset(DEFAULT_FILTER);
+    setPageSize(DEFAULT_PAGE_SIZE);
+    setOrientation(DEFAULT_ORIENTATION);
+    setFitMode(DEFAULT_FIT_MODE);
+    setResult(null);
+    setError(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
   const selectClasses =
     "mt-2 w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-400";
   const labelClasses = "block text-sm font-medium text-gray-700";
 
   const previewEntry = previewIndex !== null ? queuedImages[previewIndex] ?? null : null;
+
+  // The image shown in the dedicated "Filter preview" panel: whichever
+  // image is currently open in the lightbox, or the first uploaded image
+  // when none is open. Reuses the same per-image preview state the
+  // thumbnails and lightbox already read — no extra processing call.
+  const filterPreviewEntry = queuedImages[previewIndex ?? 0] ?? null;
+  const selectedFilterOption = FILTER_PRESETS.find(
+    (option) => option.value === filterPreset,
+  );
 
   const showPreviousPreview = () => {
     setPreviewIndex((current) => {
@@ -434,43 +502,49 @@ export default function ImageToPdfCard() {
         <div
           role="button"
           tabIndex={0}
-          onClick={() => fileInputRef.current?.click()}
+          aria-disabled={uploadDisabled || undefined}
+          onClick={() => {
+            if (!uploadDisabled) fileInputRef.current?.click();
+          }}
           onKeyDown={(event) => {
+            if (uploadDisabled) return;
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               fileInputRef.current?.click();
             }
           }}
-          onDragEnter={() => setIsDragging(true)}
+          onDragEnter={() => {
+            if (!uploadDisabled) setIsDragging(true);
+          }}
           onDragLeave={() => setIsDragging(false)}
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
             event.preventDefault();
             setIsDragging(false);
+            if (uploadDisabled) return;
             addFiles(event.dataTransfer.files);
           }}
-          className={`mx-4 sm:mx-6 mt-6 mb-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors cursor-pointer ${
-            isDragging
-              ? "border-blue-500 bg-blue-50"
-              : "border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
+          className={`mx-4 sm:mx-6 mt-6 mb-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors ${
+            uploadDisabled
+              ? "cursor-not-allowed border-gray-200 bg-gray-50 opacity-60"
+              : isDragging
+                ? "cursor-pointer border-blue-500 bg-blue-50"
+                : "cursor-pointer border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
           }`}
         >
           <p className="text-base font-medium text-gray-800 text-center">
             Choose images to convert
           </p>
-          <p className="mt-1 text-sm text-gray-500">
+          <p className="mt-1 text-sm text-gray-500 text-center">
             or drag and drop them here &middot; JPG, JPEG, or PNG &middot;
-            select multiple files
+            select multiple files &middot; each becomes one PDF page
           </p>
         </div>
 
         <div className="px-4 sm:px-6 pb-6">
           {error && (
-            <p className="mt-2 text-sm font-medium text-red-600">{error}</p>
-          )}
-          {successMessage && (
-            <p className="mt-2 text-sm font-medium text-green-600">
-              {successMessage}
+            <p role="alert" className="mt-2 text-sm font-medium text-red-600">
+              {error}
             </p>
           )}
 
@@ -482,19 +556,24 @@ export default function ImageToPdfCard() {
                 in this order
               </p>
 
-              <div className="mt-3 space-y-2">
+              <div role="list" className="mt-3 space-y-2">
                 {queuedImages.map((entry, index) => (
                   <div
                     key={entry.id}
+                    role="listitem"
                     className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5"
                   >
-                    <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-700">
+                    <span
+                      aria-hidden="true"
+                      className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-700"
+                    >
                       {index + 1}
                     </span>
                     <button
                       type="button"
                       onClick={() => setPreviewIndex(index)}
                       aria-label={`View larger preview of ${entry.file.name}`}
+                      title="View larger preview"
                       className="relative h-12 w-12 flex-none overflow-hidden rounded-md border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
                     >
                       <img
@@ -517,7 +596,7 @@ export default function ImageToPdfCard() {
                         {entry.file.name}
                       </p>
                       <p className="text-xs text-gray-500">
-                        {(entry.file.size / 1024).toFixed(2)} KB
+                        {formatFileSize(entry.file.size)}
                       </p>
                       {entry.isPreviewLoading && (
                         <p className="text-xs text-gray-400">
@@ -530,33 +609,36 @@ export default function ImageToPdfCard() {
                         </p>
                       )}
                     </div>
-                    <div className="flex flex-none items-center gap-1">
+                    <div className="flex flex-none items-center gap-0.5">
                       <button
                         type="button"
                         aria-label={`Move ${entry.file.name} earlier`}
+                        title="Move earlier"
                         onClick={() => reorder(index, index - 1)}
                         disabled={index === 0 || isProcessing}
-                        className="rounded px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 disabled:text-gray-300"
+                        className="rounded px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-100 disabled:text-gray-300"
                       >
                         ▲
                       </button>
                       <button
                         type="button"
                         aria-label={`Move ${entry.file.name} later`}
+                        title="Move later"
                         onClick={() => reorder(index, index + 1)}
                         disabled={
                           index === queuedImages.length - 1 || isProcessing
                         }
-                        className="rounded px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 disabled:text-gray-300"
+                        className="rounded px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-100 disabled:text-gray-300"
                       >
                         ▼
                       </button>
                       <button
                         type="button"
                         aria-label={`Remove ${entry.file.name}`}
+                        title="Remove"
                         onClick={() => removeImage(entry.id)}
                         disabled={isProcessing}
-                        className="rounded px-1.5 py-1 text-xs text-red-500 hover:bg-red-50 disabled:text-gray-300"
+                        className="rounded px-2 py-1.5 text-xs text-red-500 hover:bg-red-50 disabled:text-gray-300"
                       >
                         ✕
                       </button>
@@ -567,28 +649,92 @@ export default function ImageToPdfCard() {
 
               {/* FILTER */}
               <div className="mt-6">
-                <p className={labelClasses}>Filter</p>
-                <div className="mt-2 grid grid-cols-2 gap-3">
-                  {FILTER_PRESETS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => {
-                        resetOutput();
-                        setFilterPreset(option.value);
-                      }}
-                      disabled={isProcessing}
-                      className={`rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
-                        filterPreset === option.value
-                          ? "border-blue-600 bg-blue-600 text-white shadow-sm"
-                          : "border-gray-200 bg-white text-gray-700 hover:border-blue-300 hover:bg-blue-50"
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
+                <p className={labelClasses} id="image-pdf-filter-label">
+                  Filter
+                </p>
+                <div
+                  role="radiogroup"
+                  aria-labelledby="image-pdf-filter-label"
+                  className="mt-2 grid grid-cols-2 gap-3"
+                >
+                  {FILTER_PRESETS.map((option) => {
+                    const isSelected = filterPreset === option.value;
+
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        onClick={() => {
+                          resetOutput();
+                          setFilterPreset(option.value);
+                        }}
+                        disabled={isProcessing}
+                        className={`flex flex-col items-start gap-1 rounded-lg border px-4 py-3 text-left text-sm font-medium transition-colors ${
+                          isSelected
+                            ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                            : "border-gray-200 bg-white text-gray-700 hover:border-blue-300 hover:bg-blue-50"
+                        }`}
+                      >
+                        <span className="flex w-full items-center justify-between gap-2">
+                          <span>{option.label}</span>
+                          {isSelected && <CheckIcon />}
+                        </span>
+                        <span
+                          className={`text-xs font-normal ${
+                            isSelected ? "text-blue-50" : "text-gray-500"
+                          }`}
+                        >
+                          {option.description}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
+
+              {/* FILTER PREVIEW */}
+              {filterPreviewEntry && (
+                <div className="mt-6 rounded-xl border border-gray-200 p-4">
+                  <p
+                    className="text-sm font-semibold text-gray-800"
+                    id="image-pdf-filter-preview-label"
+                  >
+                    Filter preview
+                  </p>
+
+                  <div className="relative mt-3 flex h-48 w-full items-center justify-center overflow-hidden rounded-lg bg-gray-100 sm:h-56">
+                    <img
+                      src={filterPreviewEntry.previewUrl}
+                      alt={`Preview of ${filterPreviewEntry.file.name} with the ${selectedFilterOption?.label ?? filterPreset} filter`}
+                      className="max-h-full max-w-full object-contain"
+                    />
+                    {filterPreviewEntry.isPreviewLoading && (
+                      <div
+                        role="status"
+                        aria-label="Updating filter preview"
+                        className="absolute inset-0 flex items-center justify-center bg-white/70"
+                      >
+                        <span className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="mt-2 text-sm font-medium text-gray-800">
+                    {selectedFilterOption?.label ?? filterPreset}
+                  </p>
+                  {!filterPreviewEntry.isPreviewLoading && filterPreviewEntry.previewError ? (
+                    <p role="alert" className="mt-0.5 text-xs text-amber-600">
+                      {filterPreviewEntry.previewError} — showing the last available preview.
+                    </p>
+                  ) : (
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      Preview only — final PDF uses the full-resolution image.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* PDF SETTINGS */}
               <div className="mt-6 rounded-xl border border-gray-200 p-4">
@@ -617,6 +763,10 @@ export default function ImageToPdfCard() {
                         </option>
                       ))}
                     </select>
+                    <p className="mt-1 text-xs text-gray-500">
+                      A4/Letter is a fixed size; Original matches each page to
+                      its image.
+                    </p>
                   </div>
 
                   <div>
@@ -642,11 +792,11 @@ export default function ImageToPdfCard() {
                         </option>
                       ))}
                     </select>
-                    {pageSize === "original" && (
-                      <p className="mt-1 text-xs text-gray-500">
-                        Not used with an Original page size.
-                      </p>
-                    )}
+                    <p className="mt-1 text-xs text-gray-500">
+                      {pageSize === "original"
+                        ? "Not used with an Original page size."
+                        : "Auto picks the best orientation per image."}
+                    </p>
                   </div>
 
                   <div>
@@ -669,43 +819,75 @@ export default function ImageToPdfCard() {
                         </option>
                       ))}
                     </select>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Fit shows the whole image with margins; Fill crops to
+                      cover the page; Original uses native pixel size.
+                    </p>
                   </div>
                 </div>
               </div>
             </>
           )}
 
-          {result && (
-            <p className="mt-4 text-sm text-gray-500">
-              {result.imageCount} image{result.imageCount === 1 ? "" : "s"}
-              &middot; completed in{" "}
-              {(result.processingTime / 1000).toFixed(2)}s.
-            </p>
-          )}
-
           <button
             type="button"
             onClick={handleGenerate}
             disabled={!canGenerate}
-            className={`mt-6 w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
+            aria-busy={isProcessing}
+            className={`mt-6 flex w-full items-center justify-center rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
               canGenerate
                 ? "bg-blue-600 text-white hover:bg-blue-700"
                 : "bg-gray-200 text-gray-400 cursor-not-allowed"
             }`}
           >
+            {isProcessing && (
+              <svg
+                className="mr-2 h-4 w-4 animate-spin"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
+              </svg>
+            )}
             {isProcessing ? "Generating PDF..." : "Generate PDF"}
           </button>
 
-          {result && (
-            <button
-              type="button"
-              onClick={() => downloadPdfBytes(result.bytes, "images.pdf")}
-              className="mt-3 w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
-            >
-              Download PDF Again
-            </button>
+          {isProcessing && (
+            <p className="mt-2 text-center text-xs text-gray-500">
+              Generating your PDF — this should only take a moment.
+            </p>
           )}
         </div>
+
+        {result && (
+          <ResultPanel
+            icon="✓"
+            title="Your PDF is ready"
+            message={`${result.imageCount} image${result.imageCount === 1 ? "" : "s"} · ${(result.processingTime / 1000).toFixed(2)}s`}
+            stats={[
+              { label: "Output file", value: OUTPUT_FILENAME },
+              { label: "Pages", value: result.imageCount },
+              { label: "File size", value: formatFileSize(result.bytes.length) },
+            ]}
+            onDownload={() => downloadPdfBytes(result.bytes, OUTPUT_FILENAME)}
+            downloadLabel="Download PDF Again"
+            onReset={handleConvertAnother}
+            resetLabel="Convert another image set"
+          />
+        )}
       </div>
 
       {/* LIGHTBOX PREVIEW MODAL */}
@@ -720,6 +902,7 @@ export default function ImageToPdfCard() {
           <button
             type="button"
             aria-label="Close preview"
+            title="Close preview"
             onClick={(event) => {
               event.stopPropagation();
               setPreviewIndex(null);
@@ -733,6 +916,7 @@ export default function ImageToPdfCard() {
             <button
               type="button"
               aria-label="Previous image"
+              title="Previous image"
               onClick={(event) => {
                 event.stopPropagation();
                 showPreviousPreview();
@@ -747,6 +931,7 @@ export default function ImageToPdfCard() {
             <button
               type="button"
               aria-label="Next image"
+              title="Next image"
               onClick={(event) => {
                 event.stopPropagation();
                 showNextPreview();

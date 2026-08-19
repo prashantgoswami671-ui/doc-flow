@@ -7,6 +7,8 @@ import {
   type PdfMetadataFields,
   type UpdateMetadataResult,
 } from "../services/pdf/metadata";
+import { formatFileSize } from "./ResultCard";
+import ResultPanel from "./ResultPanel";
 
 function isPdfFile(file: File): boolean {
   return (
@@ -43,17 +45,62 @@ const EMPTY_FIELDS: PdfMetadataFields = {
   producer: "",
 };
 
-const FIELD_CONFIG: {
-  key: keyof PdfMetadataFields;
-  label: string;
-  placeholder: string;
+/** Two visual groups so the form reads as an organized editor rather than an arbitrary input list. */
+const FIELD_GROUPS: {
+  heading: string;
+  fields: {
+    key: keyof PdfMetadataFields;
+    label: string;
+    placeholder: string;
+    helperText: string;
+  }[];
 }[] = [
-  { key: "title", label: "Title", placeholder: "e.g. Q3 Financial Report" },
-  { key: "author", label: "Author", placeholder: "e.g. Jane Doe" },
-  { key: "subject", label: "Subject", placeholder: "e.g. Quarterly summary" },
-  { key: "keywords", label: "Keywords", placeholder: "e.g. finance, quarterly, 2026" },
-  { key: "creator", label: "Creator", placeholder: "e.g. DocFlow" },
-  { key: "producer", label: "Producer", placeholder: "e.g. DocFlow" },
+  {
+    heading: "Document information",
+    fields: [
+      {
+        key: "title",
+        label: "Title",
+        placeholder: "e.g. Q3 Financial Report",
+        helperText: "The document title shown in PDF viewers.",
+      },
+      {
+        key: "author",
+        label: "Author",
+        placeholder: "e.g. Jane Doe",
+        helperText: "Who created or owns this document.",
+      },
+      {
+        key: "subject",
+        label: "Subject",
+        placeholder: "e.g. Quarterly summary",
+        helperText: "A short description of the document's topic.",
+      },
+      {
+        key: "keywords",
+        label: "Keywords",
+        placeholder: "e.g. finance, quarterly, 2026",
+        helperText: "Search terms that help categorize the document.",
+      },
+    ],
+  },
+  {
+    heading: "PDF application information",
+    fields: [
+      {
+        key: "creator",
+        label: "Creator",
+        placeholder: "e.g. DocFlow",
+        helperText: "The application or person that created the document.",
+      },
+      {
+        key: "producer",
+        label: "Producer",
+        placeholder: "e.g. DocFlow",
+        helperText: "The application or library that generated the PDF.",
+      },
+    ],
+  },
 ];
 
 export default function MetadataEditorCard() {
@@ -66,18 +113,25 @@ export default function MetadataEditorCard() {
   const [isReading, setIsReading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [result, setResult] = useState<UpdateMetadataResult | null>(null);
 
+  // Upload must stay locked while metadata is being read or saved, so the
+  // file can't be swapped out from under an in-flight operation.
+  const uploadDisabled = isReading || isProcessing;
+
+  const resetOutput = () => {
+    setResult(null);
+    setError(null);
+  };
+
   const selectFile = async (file: File | undefined) => {
-    if (!file) return;
+    if (uploadDisabled || !file) return;
 
     if (!isPdfFile(file)) {
       setSelectedFile(null);
       setPageCount(null);
       setFields(EMPTY_FIELDS);
       setResult(null);
-      setSuccessMessage(null);
       setError("Please select a valid PDF file.");
       return;
     }
@@ -86,7 +140,6 @@ export default function MetadataEditorCard() {
     setFields(EMPTY_FIELDS);
     setPageCount(null);
     setResult(null);
-    setSuccessMessage(null);
     setError(null);
     setIsReading(true);
 
@@ -109,8 +162,7 @@ export default function MetadataEditorCard() {
   };
 
   const updateField = (key: keyof PdfMetadataFields, value: string) => {
-    setResult(null);
-    setSuccessMessage(null);
+    resetOutput();
     setFields((current) => ({ ...current, [key]: value }));
   };
 
@@ -120,7 +172,7 @@ export default function MetadataEditorCard() {
     isProcessingRef.current = true;
     setIsProcessing(true);
     setError(null);
-    setSuccessMessage(null);
+    setResult(null);
 
     try {
       const updateResult = await updatePdfMetadata(selectedFile, fields);
@@ -130,7 +182,6 @@ export default function MetadataEditorCard() {
         updateResult.bytes,
         getMetadataFilename(selectedFile.name),
       );
-      setSuccessMessage("Metadata updated and PDF downloaded.");
     } catch (saveError) {
       console.error("PDF metadata save error:", saveError);
       setError(
@@ -144,24 +195,33 @@ export default function MetadataEditorCard() {
     }
   };
 
+  /** Clears the current file, form state, and result so a different PDF can be edited. */
+  const handleEditAnother = () => {
+    setSelectedFile(null);
+    setPageCount(null);
+    setFields(EMPTY_FIELDS);
+    setIsDragging(false);
+    setIsReading(false);
+    setIsProcessing(false);
+    isProcessingRef.current = false;
+    resetOutput();
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
   const canSave = selectedFile !== null && !isProcessing && !isReading;
 
   return (
     <div className="w-full max-w-2xl mx-auto px-4 sm:px-6">
       <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
-        <div className="px-4 sm:px-6 pt-6 sm:pt-8">
-          <h2 className="text-xl font-bold text-gray-900">Edit Metadata</h2>
-          <p className="mt-1 text-sm text-gray-500">
-            View and update a PDF&apos;s title, author, and other document
-            properties.
-          </p>
-        </div>
-
         <input
           ref={fileInputRef}
           type="file"
           accept=".pdf,application/pdf"
           className="hidden"
+          disabled={uploadDisabled}
           onChange={(event) => {
             void selectFile(event.target.files?.[0]);
             event.target.value = "";
@@ -171,25 +231,34 @@ export default function MetadataEditorCard() {
         <div
           role="button"
           tabIndex={0}
-          onClick={() => fileInputRef.current?.click()}
+          aria-disabled={uploadDisabled || undefined}
+          onClick={() => {
+            if (!uploadDisabled) fileInputRef.current?.click();
+          }}
           onKeyDown={(event) => {
+            if (uploadDisabled) return;
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               fileInputRef.current?.click();
             }
           }}
-          onDragEnter={() => setIsDragging(true)}
+          onDragEnter={() => {
+            if (!uploadDisabled) setIsDragging(true);
+          }}
           onDragLeave={() => setIsDragging(false)}
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
             event.preventDefault();
             setIsDragging(false);
+            if (uploadDisabled) return;
             void selectFile(event.dataTransfer.files?.[0]);
           }}
-          className={`mx-4 sm:mx-6 mt-6 mb-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors cursor-pointer ${
-            isDragging
-              ? "border-blue-500 bg-blue-50"
-              : "border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
+          className={`mx-4 sm:mx-6 mt-6 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors ${
+            uploadDisabled
+              ? "cursor-not-allowed border-gray-200 bg-gray-50 opacity-60"
+              : isDragging
+                ? "cursor-pointer border-blue-500 bg-blue-50"
+                : "cursor-pointer border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
           }`}
         >
           <p className="text-base font-medium text-gray-800 text-center">
@@ -200,7 +269,7 @@ export default function MetadataEditorCard() {
 
         <div className="px-4 sm:px-6 pb-6">
           {selectedFile && (
-            <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3">
+            <div className="mt-4 min-w-0 rounded-lg bg-gray-50 border border-gray-200 px-4 py-3">
               <p className="text-sm font-medium text-gray-800 truncate">
                 {selectedFile.name}
               </p>
@@ -208,63 +277,145 @@ export default function MetadataEditorCard() {
                 {isReading
                   ? "Reading metadata..."
                   : pageCount !== null
-                    ? `${pageCount} page${pageCount === 1 ? "" : "s"}`
-                    : ""}
+                    ? `${pageCount} page${pageCount === 1 ? "" : "s"} · ${formatFileSize(selectedFile.size)}`
+                    : formatFileSize(selectedFile.size)}
               </p>
             </div>
           )}
 
+          {isReading && (
+            <p
+              className="mt-4 text-sm font-medium text-gray-600"
+              role="status"
+              aria-live="polite"
+            >
+              Reading metadata from your PDF...
+            </p>
+          )}
+
+          {error && (
+            <div
+              role="alert"
+              className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3"
+            >
+              <p className="text-sm font-medium text-red-700">{error}</p>
+            </div>
+          )}
+
           {selectedFile && !isReading && pageCount !== null && (
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {FIELD_CONFIG.map(({ key, label, placeholder }) => (
-                <div key={key}>
-                  <label
-                    htmlFor={`metadata-${key}`}
-                    className="block text-sm font-medium text-gray-700"
-                  >
-                    {label}
-                  </label>
-                  <input
-                    id={`metadata-${key}`}
-                    type="text"
-                    value={fields[key]}
-                    onChange={(event) => updateField(key, event.target.value)}
-                    disabled={isProcessing}
-                    placeholder={placeholder}
-                    className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  />
+            <div className="mt-6 space-y-6">
+              {FIELD_GROUPS.map((group) => (
+                <div key={group.heading}>
+                  <h3 className="text-sm font-semibold text-gray-900">
+                    {group.heading}
+                  </h3>
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {group.fields.map(({ key, label, placeholder, helperText }) => (
+                      <div key={key}>
+                        <label
+                          htmlFor={`metadata-${key}`}
+                          className="block text-sm font-medium text-gray-700"
+                        >
+                          {label}
+                        </label>
+                        <input
+                          id={`metadata-${key}`}
+                          type="text"
+                          value={fields[key]}
+                          onChange={(event) => updateField(key, event.target.value)}
+                          disabled={isProcessing}
+                          placeholder={placeholder}
+                          aria-describedby={`metadata-${key}-help`}
+                          className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-400"
+                        />
+                        <p
+                          id={`metadata-${key}-help`}
+                          className="mt-1 text-xs text-gray-500"
+                        >
+                          {helperText}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
           )}
 
-          {error && (
-            <p className="mt-4 text-sm font-medium text-red-600">{error}</p>
-          )}
-          {successMessage && (
-            <p className="mt-4 text-sm font-medium text-green-600">
-              {successMessage}
-            </p>
-          )}
-          {result && (
-            <p className="mt-2 text-sm text-gray-500">
-              Saved in {(result.processingTime / 1000).toFixed(2)}s.
-            </p>
+          {selectedFile && !isReading && pageCount !== null && (
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!canSave}
+              aria-busy={isProcessing}
+              className={`mt-6 flex w-full items-center justify-center rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
+                canSave
+                  ? "bg-blue-600 text-white hover:bg-blue-700"
+                  : "bg-gray-200 text-gray-400 cursor-not-allowed"
+              }`}
+            >
+              {isProcessing && (
+                <svg
+                  className="mr-2 h-4 w-4 animate-spin"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
+                </svg>
+              )}
+              {isProcessing ? "Saving..." : "Save metadata"}
+            </button>
           )}
 
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={!canSave}
-            className={`mt-6 w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
-              canSave
-                ? "bg-blue-600 text-white hover:bg-blue-700"
-                : "bg-gray-200 text-gray-400 cursor-not-allowed"
-            }`}
-          >
-            {isProcessing ? "Saving metadata..." : "Save Metadata"}
-          </button>
+          {isProcessing && (
+            <p
+              className="mt-2 text-center text-xs text-gray-500"
+              role="status"
+              aria-live="polite"
+            >
+              Saving your metadata changes...
+            </p>
+          )}
         </div>
+
+        {result && selectedFile && (
+          <ResultPanel
+            icon="✓"
+            title="Metadata updated"
+            message="Your PDF metadata has been updated successfully."
+            stats={[
+              { label: "Filename", value: getMetadataFilename(selectedFile.name) },
+              { label: "Pages", value: pageCount ?? "—" },
+              { label: "File size", value: formatFileSize(result.bytes.length) },
+              {
+                label: "Processing time",
+                value: `${(result.processingTime / 1000).toFixed(2)}s`,
+              },
+            ]}
+            onDownload={() =>
+              downloadPdfBytes(
+                result.bytes,
+                getMetadataFilename(selectedFile.name),
+              )
+            }
+            downloadLabel="Download PDF"
+            onReset={handleEditAnother}
+            resetLabel="Edit another PDF"
+          />
+        )}
       </div>
     </div>
   );
