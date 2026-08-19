@@ -10,6 +10,7 @@ import {
   type SplitRange,
 } from "../services/pdf/split";
 import { formatFileSize } from "./ResultCard";
+import ResultPanel from "./ResultPanel";
 
 function isPdfFile(file: File): boolean {
   return (
@@ -431,27 +432,32 @@ export default function SplitPdfCard() {
         </div>
 
         {parts.length > 0 && selectedFile && (
-          <div className="border-t border-gray-100 bg-gray-50 px-4 sm:px-6 py-6">
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 text-xl">
-                ✓
-              </div>
-              <div>
-                <p className="text-base font-semibold text-gray-900">
-                  Your split PDFs are ready
-                </p>
-                <p className="text-sm text-gray-500">
-                  {parts.length} PDF{parts.length === 1 ? "" : "s"} created
-                  {processingTime !== null
-                    ? ` · ${(processingTime / 1000).toFixed(2)}s`
-                    : ""}
-                  {" · "}
-                  {formatFileSize(totalOutputSize)} total
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-2">
+          <ResultPanel
+            icon="✓"
+            title="Your split PDFs are ready"
+            message={`${parts.length} PDF${parts.length === 1 ? "" : "s"} created`}
+            stats={[
+              { label: "Parts", value: parts.length },
+              { label: "Total size", value: formatFileSize(totalOutputSize) },
+              {
+                label: "Processing time",
+                value:
+                  processingTime !== null
+                    ? `${(processingTime / 1000).toFixed(2)}s`
+                    : "—",
+              },
+              { label: "Source pages", value: pageCount ?? "—" },
+            ]}
+            onDownload={handleDownloadAll}
+            downloadLabel={
+              parts.length > 1
+                ? `Download all ${parts.length} PDFs`
+                : "Download PDF"
+            }
+            onReset={handleSplitAnother}
+            resetLabel="Split another PDF"
+          >
+            <div className="mb-4 space-y-2">
               {parts.map((part) => (
                 <div
                   key={part.range.partNumber}
@@ -483,32 +489,14 @@ export default function SplitPdfCard() {
                         ),
                       )
                     }
-                    className="flex-none rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
+                    className="flex-none rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50"
                   >
                     Download
                   </button>
                 </div>
               ))}
             </div>
-
-            {parts.length > 1 && (
-              <button
-                type="button"
-                onClick={handleDownloadAll}
-                className="mt-3 w-full rounded-xl bg-blue-600 py-3 text-base font-semibold text-white transition hover:bg-blue-700"
-              >
-                Download all {parts.length} PDFs
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={handleSplitAnother}
-              className="mt-3 w-full rounded-xl border border-gray-300 bg-white py-3 text-base font-semibold text-gray-700 transition hover:bg-gray-50"
-            >
-              Split another PDF
-            </button>
-          </div>
+          </ResultPanel>
         )}
       </div>
     </div>
