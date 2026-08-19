@@ -9,6 +9,7 @@ import {
 } from "../services/pdf/metadata";
 import { formatFileSize } from "./ResultCard";
 import ResultPanel from "./ResultPanel";
+import UploadZone from "./UploadZone";
 
 function isPdfFile(file: File): boolean {
   return (
@@ -104,12 +105,10 @@ const FIELD_GROUPS: {
 ];
 
 export default function MetadataEditorCard() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const isProcessingRef = useRef(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [fields, setFields] = useState<PdfMetadataFields>(EMPTY_FIELDS);
-  const [isDragging, setIsDragging] = useState(false);
   const [isReading, setIsReading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -200,15 +199,10 @@ export default function MetadataEditorCard() {
     setSelectedFile(null);
     setPageCount(null);
     setFields(EMPTY_FIELDS);
-    setIsDragging(false);
     setIsReading(false);
     setIsProcessing(false);
     isProcessingRef.current = false;
     resetOutput();
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
   };
 
   const canSave = selectedFile !== null && !isProcessing && !isReading;
@@ -216,56 +210,14 @@ export default function MetadataEditorCard() {
   return (
     <div className="w-full max-w-2xl mx-auto px-4 sm:px-6">
       <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
-        <input
-          ref={fileInputRef}
-          type="file"
+        <UploadZone
           accept=".pdf,application/pdf"
-          className="hidden"
+          title="Choose a PDF to edit metadata"
+          helperText="or drag and drop it here"
+          onFileSelect={(file) => void selectFile(file)}
           disabled={uploadDisabled}
-          onChange={(event) => {
-            void selectFile(event.target.files?.[0]);
-            event.target.value = "";
-          }}
+          className="mx-4 sm:mx-6 mt-6"
         />
-
-        <div
-          role="button"
-          tabIndex={0}
-          aria-disabled={uploadDisabled || undefined}
-          onClick={() => {
-            if (!uploadDisabled) fileInputRef.current?.click();
-          }}
-          onKeyDown={(event) => {
-            if (uploadDisabled) return;
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              fileInputRef.current?.click();
-            }
-          }}
-          onDragEnter={() => {
-            if (!uploadDisabled) setIsDragging(true);
-          }}
-          onDragLeave={() => setIsDragging(false)}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-            setIsDragging(false);
-            if (uploadDisabled) return;
-            void selectFile(event.dataTransfer.files?.[0]);
-          }}
-          className={`mx-4 sm:mx-6 mt-6 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors ${
-            uploadDisabled
-              ? "cursor-not-allowed border-gray-200 bg-gray-50 opacity-60"
-              : isDragging
-                ? "cursor-pointer border-blue-500 bg-blue-50"
-                : "cursor-pointer border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
-          }`}
-        >
-          <p className="text-base font-medium text-gray-800 text-center">
-            Choose a PDF to edit metadata
-          </p>
-          <p className="mt-1 text-sm text-gray-500">or drag and drop it here</p>
-        </div>
 
         <div className="px-4 sm:px-6 pb-6">
           {selectedFile && (
