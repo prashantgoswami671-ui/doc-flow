@@ -8,6 +8,7 @@ import {
   validateInsertPosition,
   type InsertPagesResult,
 } from "../services/pdf/insertPages";
+import ResultPanel from "./ResultPanel";
 
 function isPdfFile(file: File): boolean {
   return (
@@ -58,6 +59,7 @@ function PdfPicker({
         type="file"
         accept=".pdf,application/pdf"
         className="hidden"
+        disabled={disabled}
         onChange={(event) => {
           onSelect(event.target.files?.[0]);
           event.target.value = "";
@@ -66,7 +68,8 @@ function PdfPicker({
 
       <div
         role="button"
-        tabIndex={0}
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled}
         onClick={() => !disabled && fileInputRef.current?.click()}
         onKeyDown={(event) => {
           if (disabled) return;
@@ -83,10 +86,12 @@ function PdfPicker({
           setIsDragging(false);
           if (!disabled) onSelect(event.dataTransfer.files?.[0]);
         }}
-        className={`mt-2 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-6 transition-colors cursor-pointer ${
-          isDragging
-            ? "border-blue-500 bg-blue-50"
-            : "border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
+        className={`mt-2 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-6 transition-colors ${
+          disabled
+            ? "cursor-not-allowed border-gray-200 bg-gray-100 opacity-60"
+            : isDragging
+              ? "cursor-pointer border-blue-500 bg-blue-50"
+              : "cursor-pointer border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
         }`}
       >
         <p className="text-sm font-medium text-gray-800 text-center">
@@ -129,12 +134,23 @@ export default function InsertPagesCard() {
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [result, setResult] = useState<InsertPagesResult | null>(null);
 
   const resetOutput = () => {
     setResult(null);
-    setSuccessMessage(null);
+    setError(null);
+  };
+
+  const resetAll = () => {
+    setTargetFile(null);
+    setTargetPageCount(null);
+    setSourceFile(null);
+    setSourcePageCount(null);
+    setSourcePageSelection("");
+    setInsertPositionInput("");
+    setIsReadingTarget(false);
+    setIsReadingSource(false);
+    setResult(null);
     setError(null);
   };
 
@@ -154,7 +170,6 @@ export default function InsertPagesCard() {
 
     try {
       const count = await getPdfPageCount(file);
-
       setTargetPageCount(count);
     } catch (readError) {
       console.error("Target PDF read error:", readError);
@@ -183,7 +198,6 @@ export default function InsertPagesCard() {
 
     try {
       const count = await getPdfPageCount(file);
-
       setSourcePageCount(count);
     } catch (readError) {
       console.error("Source PDF read error:", readError);
@@ -197,8 +211,6 @@ export default function InsertPagesCard() {
     }
   };
 
-  // Live preview: validate selection + position against known page counts,
-  // without touching PDF bytes yet.
   let selectedSourcePages: number[] | null = null;
   let previewError: string | null = null;
   let insertPosition: number | null = null;
@@ -268,7 +280,6 @@ export default function InsertPagesCard() {
     isProcessingRef.current = true;
     setIsProcessing(true);
     setError(null);
-    setSuccessMessage(null);
 
     try {
       const insertResult = await insertPages(
@@ -280,11 +291,6 @@ export default function InsertPagesCard() {
 
       setResult(insertResult);
       downloadPdfBytes(insertResult.bytes, "document-with-inserted-pages.pdf");
-      setSuccessMessage(
-        `Inserted ${insertResult.insertedPageCount} page${
-          insertResult.insertedPageCount === 1 ? "" : "s"
-        }. Final PDF has ${insertResult.finalPageCount} pages.`,
-      );
     } catch (insertError) {
       console.error("PDF insert error:", insertError);
       setError(
@@ -298,9 +304,17 @@ export default function InsertPagesCard() {
     }
   };
 
+  const handleDownloadResult = () => {
+    if (!result) return;
+    downloadPdfBytes(result.bytes, "document-with-inserted-pages.pdf");
+  };
+
   return (
     <div className="w-full max-w-2xl mx-auto px-4 sm:px-6">
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+      <div
+        className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden"
+        aria-busy={isProcessing}
+      >
         <div className="px-4 sm:px-6 pt-6 sm:pt-8">
           <h2 className="text-xl font-bold text-gray-900">Insert Pages</h2>
           <p className="mt-1 text-sm text-gray-500">
@@ -380,7 +394,7 @@ export default function InsertPagesCard() {
               </p>
 
               {previewError && (
-                <p className="mt-3 text-sm font-medium text-amber-600">
+                <p className="mt-3 text-sm font-medium text-amber-600" role="alert">
                   {previewError}
                 </p>
               )}
@@ -390,9 +404,7 @@ export default function InsertPagesCard() {
                 selectedSourcePages.length > 0 &&
                 insertPositionLabel !== null && (
                   <div className="mt-4 rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 space-y-1">
-                    <p className="text-sm font-medium text-gray-700">
-                      Preview
-                    </p>
+                    <p className="text-sm font-medium text-gray-700">Preview</p>
                     <p className="text-sm text-gray-500">
                       Target: {targetFile.name} — {targetPageCount} pages
                     </p>
@@ -400,15 +412,13 @@ export default function InsertPagesCard() {
                       Source: {sourceFile.name} — {sourcePageCount} pages
                     </p>
                     <p className="text-sm text-gray-500">
-                      Selected source pages:{" "}
-                      {selectedSourcePages.join(", ")}
+                      Selected source pages: {selectedSourcePages.join(", ")}
                     </p>
                     <p className="text-sm text-gray-500">
                       Insert position: {insertPositionLabel}
                     </p>
                     <p className="text-sm text-gray-500">
-                      Result: {targetPageCount + selectedSourcePages.length}{" "}
-                      pages
+                      Result: {targetPageCount + selectedSourcePages.length} pages
                     </p>
                   </div>
                 )}
@@ -416,34 +426,72 @@ export default function InsertPagesCard() {
           )}
 
           {error && (
-            <p className="mt-4 text-sm font-medium text-red-600">{error}</p>
-          )}
-          {successMessage && (
-            <p className="mt-4 text-sm font-medium text-green-600">
-              {successMessage}
-            </p>
-          )}
-          {result && (
-            <p className="mt-2 text-sm text-gray-500">
-              {result.targetPageCount}-page target + {result.insertedPageCount}{" "}
-              inserted page{result.insertedPageCount === 1 ? "" : "s"} ={" "}
-              {result.finalPageCount}-page result, completed in{" "}
-              {(result.processingTime / 1000).toFixed(2)}s.
+            <p className="mt-4 text-sm font-medium text-red-600" role="alert">
+              {error}
             </p>
           )}
 
-          <button
-            type="button"
-            onClick={handleInsert}
-            disabled={!canProcess}
-            className={`mt-6 w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
-              canProcess
-                ? "bg-blue-600 text-white hover:bg-blue-700"
-                : "bg-gray-200 text-gray-400 cursor-not-allowed"
-            }`}
-          >
-            {isProcessing ? "Inserting pages..." : "Insert Pages"}
-          </button>
+          {result && (
+            <ResultPanel
+              icon="✓"
+              title="Your PDF is ready"
+              message="Pages inserted successfully"
+              stats={[
+                { label: "Inserted pages", value: result.insertedPageCount },
+                { label: "Final pages", value: result.finalPageCount },
+                {
+                  label: "Processing time",
+                  value: `${(result.processingTime / 1000).toFixed(2)}s`,
+                },
+                {
+                  label: "Output size",
+                  value: `${(result.bytes.byteLength / 1024).toFixed(1)} KB`,
+                },
+              ]}
+              onDownload={handleDownloadResult}
+              downloadLabel="Download PDF"
+              onReset={resetAll}
+              resetLabel="Insert pages into another PDF"
+            >
+              <div className="mb-4 rounded-lg border border-gray-200 bg-white px-4 py-3 space-y-1">
+                <p className="text-sm font-medium text-gray-700">Operation details</p>
+                <p className="text-sm text-gray-500">
+                  Target: {result.targetPageCount} pages
+                </p>
+                <p className="text-sm text-gray-500">
+                  Insert position: {insertPositionLabel ?? result.insertPosition}
+                </p>
+                <p className="text-sm text-gray-500">
+                  Source pages inserted: {result.selectedSourcePageNumbers.join(", ")}
+                </p>
+              </div>
+            </ResultPanel>
+          )}
+
+          {!result && (
+            <button
+              type="button"
+              onClick={handleInsert}
+              disabled={!canProcess}
+              className={`mt-6 w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors ${
+                canProcess
+                  ? "bg-blue-600 text-white hover:bg-blue-700"
+                  : "bg-gray-200 text-gray-400 cursor-not-allowed"
+              }`}
+            >
+              {isProcessing ? (
+                <span className="inline-flex items-center justify-center gap-2">
+                  <span
+                    className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
+                    aria-hidden="true"
+                  />
+                  Inserting pages...
+                </span>
+              ) : (
+                "Insert Pages"
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>
