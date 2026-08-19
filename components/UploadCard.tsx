@@ -10,25 +10,44 @@ import {
 
 import ResultCard, { formatFileSize } from "./ResultCard";
 
-const compressionOptions: {
+interface CompressionOptionTrait {
+  /** Small leading glyph, matching the emoji-tag pattern already used in ResultCard. */
+  icon: string;
+  text: string;
+}
+
+interface CompressionOptionMeta {
   id: CompressionMode;
   label: string;
   description: string;
-}[] = [
+  /** Short gain/loss cues shown under the description so the trade-off is visible before compressing. */
+  traits: CompressionOptionTrait[];
+}
+
+const compressionOptions: CompressionOptionMeta[] = [
   {
     id: "light",
     label: "Light Compression",
     description: "Keeps quality high; reduces size where it's easy to.",
+    traits: [
+      { icon: "\ud83d\udd0d", text: "Higher visual quality" },
+      { icon: "\ud83d\udcc9", text: "Smaller size reduction" },
+    ],
   },
   {
     id: "heavy",
     label: "Heavy Compression",
     description: "Prioritizes a smaller file; quality loss may be more visible.",
+    traits: [
+      { icon: "\ud83d\udce6", text: "Largest size reduction" },
+      { icon: "\u26a0\ufe0f", text: "More visible quality loss" },
+    ],
   },
   {
     id: "custom",
     label: "Custom Size",
     description: "Set a target size and DocFlow will try to reach it.",
+    traits: [{ icon: "\ud83c\udfaf", text: "You choose the target size" }],
   },
 ];
 
@@ -383,9 +402,9 @@ export default function UploadCard() {
                   aria-checked={isSelected}
                   onClick={() => setCompressionMode(option.id)}
                   disabled={isProcessing}
-                  className={`flex flex-col items-start gap-1 rounded-lg border px-4 py-3 text-left transition-colors ${
+                  className={`flex flex-col items-start gap-1.5 rounded-lg border px-4 py-3 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
                     isSelected
-                      ? "border-blue-600 bg-blue-50 ring-1 ring-blue-600"
+                      ? "border-blue-600 bg-blue-50 ring-2 ring-blue-600 shadow-sm"
                       : "border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/50"
                   } ${isProcessing ? "cursor-not-allowed opacity-60" : ""}`}
                 >
@@ -415,6 +434,17 @@ export default function UploadCard() {
                   </span>
                   <span className="text-xs text-gray-500">
                     {option.description}
+                  </span>
+                  <span className="mt-1 flex flex-col gap-0.5">
+                    {option.traits.map((trait) => (
+                      <span
+                        key={trait.text}
+                        className="flex items-center gap-1 text-[11px] leading-tight text-gray-500"
+                      >
+                        <span aria-hidden="true">{trait.icon}</span>
+                        {trait.text}
+                      </span>
+                    ))}
                   </span>
                 </button>
               );
