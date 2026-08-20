@@ -6,9 +6,14 @@ import {
   type ImageOutputFormat,
   type PdfToImagePageResult,
 } from "../services/pdf/pdfToImage";
-import { renderPageThumbnails, type PageThumbnail } from "../services/pdf/thumbnails";
+import {
+  renderPageThumbnails,
+  renderSinglePagePreview,
+  type PageThumbnail,
+} from "../services/pdf/thumbnails";
 import PageThumbnailGrid from "./PageThumbnailGrid";
 import ResultPanel from "./ResultPanel";
+import UploadZone from "./UploadZone";
 import { formatFileSize } from "./ResultCard";
 
 function isPdfFile(file: File): boolean {
@@ -74,17 +79,37 @@ const RESOLUTION_OPTIONS: { dpi: number; label: string }[] = [
 
 const DEFAULT_JPG_QUALITY = 0.92;
 
+// Longest edge, in CSS pixels, for the on-demand enlarged-preview render.
+// This is only used for the single clicked page (via
+// `renderSinglePagePreview`) — the thumbnail grid itself keeps using the
+// much smaller `DEFAULT_MAX_DIMENSION` from `services/pdf/thumbnails.ts`.
+const ENLARGED_PREVIEW_MAX_DIMENSION = 1600;
+
+type EnlargedPreviewStatus = "loading" | "loaded" | "error";
+
 export default function PdfToImageCard() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const isProcessingRef = useRef(false);
   const previewRequestIdRef = useRef(0);
   const resultsRef = useRef<GeneratedImage[]>([]);
+  const enlargedPreviewCloseButtonRef = useRef<HTMLButtonElement>(null);
+  const enlargedPreviewTriggerRef = useRef<HTMLElement | null>(null);
+  const enlargedPreviewRequestIdRef = useRef(0);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [thumbnails, setThumbnails] = useState<PageThumbnail[]>([]);
-  const [isDragging, setIsDragging] = useState(false);
   const [isLoadingPreviews, setIsLoadingPreviews] = useState(false);
   const [previewProgress, setPreviewProgress] = useState("");
+  const [enlargedPreviewPage, setEnlargedPreviewPage] = useState<PageThumbnail | null>(
+    null,
+  );
+  const [enlargedPreviewDataUrl, setEnlargedPreviewDataUrl] = useState<string | null>(
+    null,
+  );
+  const [enlargedPreviewStatus, setEnlargedPreviewStatus] =
+    useState<EnlargedPreviewStatus | null>(null);
+  const [enlargedPreviewError, setEnlargedPreviewError] = useState<string | null>(
+    null,
+  );
 
   const [selectionMode, setSelectionMode] = useState<"all" | "selected">("all");
   const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set());
@@ -130,10 +155,11 @@ export default function PdfToImageCard() {
     resetOutput();
     setIsLoadingPreviews(false);
     setPreviewProgress("");
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+    enlargedPreviewRequestIdRef.current += 1;
+    setEnlargedPreviewPage(null);
+    setEnlargedPreviewDataUrl(null);
+    setEnlargedPreviewStatus(null);
+    setEnlargedPreviewError(null);
   };
 
   const loadPreviews = async (file: File) => {
@@ -190,6 +216,11 @@ export default function PdfToImageCard() {
     setSelectionMode("all");
     setSelectedPages(new Set());
     resetOutput();
+    enlargedPreviewRequestIdRef.current += 1;
+    setEnlargedPreviewPage(null);
+    setEnlargedPreviewDataUrl(null);
+    setEnlargedPreviewStatus(null);
+    setEnlargedPreviewError(null);
     void loadPreviews(file);
   };
 
@@ -207,6 +238,101 @@ export default function PdfToImageCard() {
       return next;
     });
   };
+
+  // Opens the enlarged-preview modal for `page` and kicks off an on-demand,
+  // higher-resolution render of just that page via `renderSinglePagePreview`
+  // (see services/pdf/thumbnails.ts). The small thumbnail dataUrl already in
+  // `page` is shown as a fallback only if this render fails; it is never
+  // used as the enlarged image itself.
+  const openEnlargedPreview = (page: PageThumbnail) => {
+    // Remember whatever had focus (the clicked thumbnail button) so it can
+    // be refocused when the modal closes.
+    if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
+      enlargedPreviewTriggerRef.current = document.activeElement;
+    }
+
+    // Bump the request id so any still-in-flight render for a previously
+    // clicked page can no longer apply its result once it resolves.
+    const requestId = ++enlargedPreviewRequestIdRef.current;
+
+    setEnlargedPreviewPage(page);
+    setEnlargedPreviewDataUrl(null);
+    setEnlargedPreviewError(null);
+    setEnlargedPreviewStatus("loading");
+
+    if (!selectedFile) {
+      setEnlargedPreviewStatus("error");
+      setEnlargedPreviewError("No PDF is currently loaded.");
+      return;
+    }
+
+    void renderSinglePagePreview(
+      selectedFile,
+      page.pageNumber,
+      ENLARGED_PREVIEW_MAX_DIMENSION,
+    )
+      .then((preview) => {
+        // A newer click (or a reset) has since invalidated this request.
+        if (requestId !== enlargedPreviewRequestIdRef.current) return;
+
+        setEnlargedPreviewDataUrl(preview.dataUrl);
+        setEnlargedPreviewStatus("loaded");
+      })
+      .catch((previewError) => {
+        console.error("Enlarged page preview error:", previewError);
+
+        if (requestId !== enlargedPreviewRequestIdRef.current) return;
+
+        setEnlargedPreviewStatus("error");
+        setEnlargedPreviewError(
+          previewError instanceof Error
+            ? `Unable to render a high-resolution preview: ${previewError.message}`
+            : "Unable to render a high-resolution preview for this page.",
+        );
+      });
+  };
+
+  const closeEnlargedPreview = () => {
+    // Invalidate any render still in flight for the page being closed.
+    enlargedPreviewRequestIdRef.current += 1;
+
+    setEnlargedPreviewPage(null);
+    setEnlargedPreviewDataUrl(null);
+    setEnlargedPreviewStatus(null);
+    setEnlargedPreviewError(null);
+
+    const triggerElement = enlargedPreviewTriggerRef.current;
+    enlargedPreviewTriggerRef.current = null;
+    triggerElement?.focus();
+  };
+
+  const handleThumbnailClick = (page: PageThumbnail) => {
+    togglePageSelection(page.pageNumber);
+    openEnlargedPreview(page);
+  };
+
+  // Dismiss the enlarged preview with Escape while it's open.
+  useEffect(() => {
+    if (!enlargedPreviewPage) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeEnlargedPreview();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enlargedPreviewPage]);
+
+  // Move keyboard focus into the dialog (onto its Close button) when it opens.
+  useEffect(() => {
+    if (enlargedPreviewPage) {
+      enlargedPreviewCloseButtonRef.current?.focus();
+    }
+  }, [enlargedPreviewPage]);
 
   const handleConvert = async () => {
     if (isProcessingRef.current || !selectedFile) return;
@@ -309,57 +435,14 @@ export default function PdfToImageCard() {
           </p>
         </div>
 
-        <input
-          ref={fileInputRef}
-          type="file"
+        <UploadZone
           accept=".pdf,application/pdf"
-          className="hidden"
-          onChange={(event) => {
-            selectFile(event.target.files?.[0]);
-            event.target.value = "";
-          }}
+          title="Choose a PDF to convert"
+          helperText="or drag and drop it here · PDF files only"
+          onFileSelect={(file) => void selectFile(file)}
+          disabled={uploadDisabled}
+          className="mx-4 sm:mx-6 mt-6 mb-4"
         />
-
-        <div
-          role="button"
-          tabIndex={0}
-          aria-disabled={uploadDisabled || undefined}
-          onClick={() => {
-            if (!uploadDisabled) fileInputRef.current?.click();
-          }}
-          onKeyDown={(event) => {
-            if (uploadDisabled) return;
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              fileInputRef.current?.click();
-            }
-          }}
-          onDragEnter={() => {
-            if (!uploadDisabled) setIsDragging(true);
-          }}
-          onDragLeave={() => setIsDragging(false)}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-            setIsDragging(false);
-            if (uploadDisabled) return;
-            selectFile(event.dataTransfer.files?.[0]);
-          }}
-          className={`mx-4 sm:mx-6 mt-6 mb-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors ${
-            uploadDisabled
-              ? "cursor-not-allowed border-gray-200 bg-gray-50 opacity-60"
-              : isDragging
-                ? "cursor-pointer border-blue-500 bg-blue-50"
-                : "cursor-pointer border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
-          }`}
-        >
-          <p className="text-base font-medium text-gray-800 text-center">
-            Choose a PDF to convert
-          </p>
-          <p className="mt-1 text-sm text-gray-500 text-center">
-            or drag and drop it here &middot; PDF files only
-          </p>
-        </div>
 
         <div className="px-4 sm:px-6 pb-6">
           {selectedFile && (
@@ -454,7 +537,7 @@ export default function PdfToImageCard() {
                       <PageThumbnailGrid
                         pages={thumbnails}
                         isSelected={(page) => selectedPages.has(page.pageNumber)}
-                        onPageClick={(page) => togglePageSelection(page.pageNumber)}
+                        onPageClick={handleThumbnailClick}
                         disabled={isProcessing}
                       />
                     </div>
@@ -694,6 +777,113 @@ export default function PdfToImageCard() {
           </ResultPanel>
         )}
       </div>
+
+      {enlargedPreviewPage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+          onClick={closeEnlargedPreview}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pdf-to-image-enlarged-preview-title"
+            onClick={(event) => event.stopPropagation()}
+            className="relative w-full max-w-lg rounded-2xl bg-white p-4 shadow-xl"
+          >
+            <div className="flex items-center justify-between">
+              <h3
+                id="pdf-to-image-enlarged-preview-title"
+                className="text-sm font-semibold text-gray-800"
+              >
+                Page {enlargedPreviewPage.pageNumber} preview
+              </h3>
+              <button
+                ref={enlargedPreviewCloseButtonRef}
+                type="button"
+                onClick={closeEnlargedPreview}
+                aria-label="Close page preview"
+                className="rounded-full p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
+              >
+                <svg
+                  className="h-5 w-5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="mt-3 flex min-h-[200px] items-center justify-center rounded-lg bg-gray-50 p-2">
+              {enlargedPreviewStatus === "loading" && (
+                <div className="flex flex-col items-center gap-2 py-12">
+                  <svg
+                    className="h-6 w-6 animate-spin text-gray-400"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  <p className="text-sm text-gray-500">
+                    Rendering high-resolution preview...
+                  </p>
+                </div>
+              )}
+
+              {enlargedPreviewStatus === "loaded" && enlargedPreviewDataUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={enlargedPreviewDataUrl}
+                  alt={`Page ${enlargedPreviewPage.pageNumber} enlarged preview`}
+                  className="max-h-[70vh] w-auto max-w-full object-contain"
+                />
+              )}
+
+              {enlargedPreviewStatus === "error" && (
+                <div className="flex flex-col items-center gap-3 py-6 text-center">
+                  <p className="text-sm font-medium text-red-600">
+                    {enlargedPreviewError ??
+                      "Unable to render a high-resolution preview for this page."}
+                  </p>
+                  {enlargedPreviewPage.dataUrl ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={enlargedPreviewPage.dataUrl}
+                        alt={`Page ${enlargedPreviewPage.pageNumber} lower-resolution preview`}
+                        className="max-h-[50vh] w-auto max-w-full object-contain"
+                      />
+                      <p className="text-xs text-gray-500">
+                        Showing the lower-resolution thumbnail instead.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-xs text-gray-500">
+                      No preview is available for this page.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
