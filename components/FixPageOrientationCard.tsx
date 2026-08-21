@@ -17,6 +17,7 @@ import {
   renderSinglePagePreview,
   type SinglePagePreview,
 } from "../services/pdf/thumbnails";
+import UploadZone from "./UploadZone";
 
 type PreviewRotation = 0 | RotationDegrees;
 type PreviewNavScope = "all" | "flagged";
@@ -138,7 +139,6 @@ function getConfidenceLabel(page: PageOrientationResult): string {
 }
 
 export default function FixPageOrientationCard() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const isProcessingRef = useRef(false);
   const analysisRequestIdRef = useRef(0);
   const thumbnailRequestIdRef = useRef(0);
@@ -146,7 +146,6 @@ export default function FixPageOrientationCard() {
   const previewImageCacheRef = useRef<Map<number, SinglePagePreview>>(new Map());
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState("");
   const [analysis, setAnalysis] = useState<OrientationAnalysisResult | null>(null);
@@ -492,10 +491,6 @@ export default function FixPageOrientationCard() {
     setSuccessMessage(null);
     setIsAnalyzing(false);
     setAnalysisProgress("");
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
   };
 
   const detectedPageCount = analysis?.pages.filter((page) =>
@@ -519,46 +514,14 @@ export default function FixPageOrientationCard() {
           </p>
         </div>
 
-        <input
-          ref={fileInputRef}
-          type="file"
+        <UploadZone
           accept=".pdf,application/pdf"
-          className="hidden"
-          onChange={(event) => {
-            selectFile(event.target.files?.[0]);
-            event.target.value = "";
-          }}
+          onFileSelect={(file) => void selectFile(file)}
+          disabled={isAnalyzing || isProcessing}
+          title="Choose a PDF to analyze"
+          helperText="or drag and drop it here"
+          className="mx-4 sm:mx-6 mt-6 mb-4"
         />
-
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => fileInputRef.current?.click()}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              fileInputRef.current?.click();
-            }
-          }}
-          onDragEnter={() => setIsDragging(true)}
-          onDragLeave={() => setIsDragging(false)}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-            setIsDragging(false);
-            selectFile(event.dataTransfer.files?.[0]);
-          }}
-          className={`mx-4 sm:mx-6 mt-6 mb-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors cursor-pointer ${
-            isDragging
-              ? "border-blue-500 bg-blue-50"
-              : "border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
-          }`}
-        >
-          <p className="text-base font-medium text-gray-800 text-center">
-            Choose a PDF to analyze
-          </p>
-          <p className="mt-1 text-sm text-gray-500">or drag and drop it here</p>
-        </div>
 
         <div className="px-4 sm:px-6 pb-6">
           {selectedFile && (

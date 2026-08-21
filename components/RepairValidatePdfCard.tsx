@@ -15,6 +15,7 @@ import {
 } from "../services/pdf/repairValidate";
 import ResultPanel from "./ResultPanel";
 import ProcessingState from "./ProcessingState";
+import UploadZone from "./UploadZone";
 
 function isPdfFile(file: File): boolean {
   return (
@@ -292,12 +293,10 @@ function StatusIconCircle({
 }
 
 export default function RepairValidatePdfCard() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const validationRequestIdRef = useRef(0);
   const isRepairingRef = useRef(false);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<PdfValidationResult | null>(null);
   const [isRepairing, setIsRepairing] = useState(false);
@@ -433,15 +432,10 @@ export default function RepairValidatePdfCard() {
     isRepairingRef.current = false;
 
     setSelectedFile(null);
-    setIsDragging(false);
     setIsValidating(false);
     setIsRepairing(false);
     setRepairStage(null);
     resetOutput();
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
   };
 
   const canRepair =
@@ -467,46 +461,14 @@ export default function RepairValidatePdfCard() {
           </p>
         </div>
 
-        <input
-          ref={fileInputRef}
-          type="file"
+        <UploadZone
           accept=".pdf,application/pdf"
-          className="hidden"
-          onChange={(event) => {
-            selectFile(event.target.files?.[0]);
-            event.target.value = "";
-          }}
+          onFileSelect={(file) => void selectFile(file)}
+          disabled={isValidating || isRepairing}
+          title="Upload a PDF to check its integrity"
+          helperText="or drag and drop it here"
+          className="mx-4 sm:mx-6 mt-6 mb-4"
         />
-
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => fileInputRef.current?.click()}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              fileInputRef.current?.click();
-            }
-          }}
-          onDragEnter={() => setIsDragging(true)}
-          onDragLeave={() => setIsDragging(false)}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-            setIsDragging(false);
-            selectFile(event.dataTransfer.files?.[0]);
-          }}
-          className={`mx-4 sm:mx-6 mt-6 mb-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors cursor-pointer ${
-            isDragging
-              ? "border-blue-500 bg-blue-50"
-              : "border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
-          }`}
-        >
-          <p className="text-base font-medium text-gray-800 text-center">
-            Upload a PDF to check its integrity
-          </p>
-          <p className="mt-1 text-sm text-gray-500">or drag and drop it here</p>
-        </div>
 
         <div className="px-4 sm:px-6 pb-6">
           {!selectedFile && (
