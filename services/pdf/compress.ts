@@ -95,6 +95,43 @@ async function compressToCustomTarget(
   return bestWithinTarget ?? smallestPractical ?? originalBytes;
 }
 
+/**
+ * Loads the source PDF once up front so every mode shares the same page
+ * count and can detect an encrypted/malformed source before any
+ * rasterization work starts. Mirrors the encryption-detection pattern
+ * already used by protect.ts / unlock.ts / repairValidate.ts, since plain
+ * pdf-lib throws a generic error on an encrypted PDF otherwise.
+ */
+async function loadCompressibleSourceOrThrow(
+  file: File,
+): Promise<{ originalPdfBytes: ArrayBuffer; pageCount: number }> {
+  let originalPdfBytes: ArrayBuffer;
+
+  try {
+    originalPdfBytes = await file.arrayBuffer();
+  } catch {
+    throw new Error(`"${file.name}" could not be read.`);
+  }
+
+  try {
+    const originalPdf = await PDFDocument.load(originalPdfBytes);
+
+    return { originalPdfBytes, pageCount: originalPdf.getPageCount() };
+  } catch (loadError) {
+    const message = loadError instanceof Error ? loadError.message : "";
+
+    if (/encrypt/i.test(message)) {
+      throw new Error(
+        `"${file.name}" is password protected. Use Unlock PDF first, then compress the unlocked file.`,
+      );
+    }
+
+    throw new Error(
+      `"${file.name}" could not be read as a PDF. It may be corrupted or not a valid PDF file.`,
+    );
+  }
+}
+
 export async function compressPDF(
   file: File,
   mode: CompressionMode,
@@ -103,9 +140,10 @@ export async function compressPDF(
   const startTime = performance.now();
 
   const originalSize = file.size;
+  const { originalPdfBytes, pageCount } =
+    await loadCompressibleSourceOrThrow(file);
 
   let savedPdfBytes: Uint8Array;
-  let pageCount: number;
 
   /*
    * Light and Heavy compression:
@@ -117,17 +155,15 @@ export async function compressPDF(
 
     savedPdfBytes = await rasterizePDF(file, rasterMode);
 
-    // Get the original page count.
-    const originalPdfBytes = await file.arrayBuffer();
-    const originalPdf = await PDFDocument.load(originalPdfBytes);
-
-    pageCount = originalPdf.getPageCount();
-
-    if (
-      mode === "light" &&
-      (savedPdfBytes.length >= originalSize ||
-        savedPdfBytes.length < originalSize * 0.6)
-    ) {
+    // Never hand back a file that's larger than (or barely smaller than)
+    // the original — Light and Heavy both fall back to the original bytes
+    // in that case. Light additionally rejects suspiciously small output
+    // (< 60% of original), since that range is outside what Light's
+    // gentler settings should ever produce and more likely indicates a
+    // degraded render than a genuine reduction.
+    if (savedPdfBytes.length >= originalSize) {
+      savedPdfBytes = new Uint8Array(originalPdfBytes);
+    } else if (mode === "light" && savedPdfBytes.length < originalSize * 0.6) {
       savedPdfBytes = new Uint8Array(originalPdfBytes);
     }
   } else {
@@ -139,12 +175,9 @@ export async function compressPDF(
       throw new Error("A positive custom target size is required.");
     }
 
-    const originalPdfBytes = await file.arrayBuffer();
-    const originalPdf = await PDFDocument.load(originalPdfBytes);
     const originalBytes = new Uint8Array(originalPdfBytes);
     const targetBytes = customTargetSizeMb * 1024 * 1024;
 
-    pageCount = originalPdf.getPageCount();
     savedPdfBytes =
       originalSize <= targetBytes
         ? originalBytes

@@ -87,7 +87,7 @@ function downloadPdfBytes(bytes: Uint8Array, filename: string): void {
   URL.revokeObjectURL(objectUrl);
 }
 
-export default function UploadCard() {
+export default function CompressPdfCard() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isProcessingRef = useRef(false);
   const analysisRequestIdRef = useRef(0);
@@ -110,6 +110,12 @@ export default function UploadCard() {
   /** Runs PDF analysis and ignores stale results from earlier selections. */
   const startAnalysis = async (file: File) => {
     const requestId = ++analysisRequestIdRef.current;
+
+    // Warm up the pdfjs-dist chunk now, while the "Analyzing PDF..." state
+    // is already showing, so it isn't loaded for the first time right as
+    // compression starts (which is what caused the processing-state flash).
+    // Fire-and-forget: compression logic itself is untouched.
+    void import("pdfjs-dist/legacy/build/pdf.mjs");
 
     setAnalysis(null);
     setAnalysisError(null);

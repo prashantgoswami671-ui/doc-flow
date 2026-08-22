@@ -7,7 +7,7 @@ import InsertPagesCard from "../InsertPagesCard";
 import MergePdfCard from "../MergePdfCard";
 import ImageToPdfCard from "../ImageToPdfCard";
 import PdfToImageCard from "../PdfToImageCard";
-import UploadCard from "../UploadCard";
+import CompressPdfCard from "../CompressPdfCard";
 import FixPageOrientationCard from "../FixPageOrientationCard";
 import RepairValidatePdfCard from "../RepairValidatePdfCard";
 import MetadataEditorCard from "../MetadataEditorCard";
@@ -32,7 +32,7 @@ export const TOOL_COMPONENTS: Record<string, ComponentType> = {
   "merge-pdf": MergePdfCard,
   "image-to-pdf": ImageToPdfCard,
   "pdf-to-image": PdfToImageCard,
-  "compress-pdf": UploadCard,
+  "compress-pdf": CompressPdfCard,
   "fix-orientation": FixPageOrientationCard,
   "repair-validate": RepairValidatePdfCard,
   metadata: MetadataEditorCard,

@@ -8,7 +8,7 @@ import InsertPagesCard from "../components/InsertPagesCard";
 import MergePdfCard from "../components/MergePdfCard";
 import ImageToPdfCard from "../components/ImageToPdfCard";
 import PdfToImageCard from "../components/PdfToImageCard";
-import UploadCard from "../components/UploadCard";
+import CompressPdfCard from "../components/CompressPdfCard";
 import FixPageOrientationCard from "../components/FixPageOrientationCard";
 import RepairValidatePdfCard from "../components/RepairValidatePdfCard";
 import MetadataEditorCard from "../components/MetadataEditorCard";
@@ -79,7 +79,7 @@ export default function Home() {
           </p>
         </div>
         <div className="mt-10 space-y-12">
-          <UploadCard />
+          <CompressPdfCard />
           <FixPageOrientationCard />
           <RepairValidatePdfCard />
           <MetadataEditorCard />

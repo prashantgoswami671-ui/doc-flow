@@ -130,6 +130,14 @@ export async function rasterizePDFWithSettings(
           canvas.height = 0;
         }
       }
+
+      // Yield to the browser between pages. The JPEG encode above
+      // (canvas.toDataURL / toBlob) and the surrounding render/embed work
+      // run on the main thread with few natural yield points, so on
+      // multi-page PDFs the tab can go unresponsive for the whole loop.
+      // This does not change scale, quality, or the encoded bytes for any
+      // page — it only lets the browser paint/handle input between pages.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
 
     return outputPdf.save();
