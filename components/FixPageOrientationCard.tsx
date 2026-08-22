@@ -133,7 +133,12 @@ function getPreviewReason(page: PageOrientationResult): string {
 }
 
 function getConfidenceLabel(page: PageOrientationResult): string {
-  return page.status === "unable-to-detect"
+  // "needs-review" carries confidence: 0 by contract -- that's a sentinel
+  // meaning "no meaningful orientation confidence exists", not a real 0%
+  // measurement. Showing it as a percentage next to "Needs review" reads as
+  // false precision (as if the system tried and scored 0), so it gets the
+  // same treatment as "unable-to-detect".
+  return page.status === "unable-to-detect" || page.status === "needs-review"
     ? "—"
     : `${Math.round(page.confidence * 100)}%`;
 }
@@ -635,11 +640,12 @@ export default function FixPageOrientationCard() {
                       <p className={`mt-0.5 text-center text-[11px] font-medium ${getStatusClass(page.status)}`}>
                         {getStatusLabel(page)}
                       </p>
-                      {page.status !== "unable-to-detect" && (
-                        <p className="text-center text-[11px] text-gray-500">
-                          {getConfidenceLabel(page)} confidence
-                        </p>
-                      )}
+                      {page.status !== "unable-to-detect" &&
+                        page.status !== "needs-review" && (
+                          <p className="text-center text-[11px] text-gray-500">
+                            {getConfidenceLabel(page)} confidence
+                          </p>
+                        )}
 
                       {requiresManualCorrection && (
                         <label

@@ -36,15 +36,22 @@ interface TextEvidence {
   weight: number;
 }
 
-interface RasterEvidence {
+export interface RasterEvidence {
   orientation: "portrait" | "landscape";
 }
 
-interface OCROrientationEvidence {
+export interface OCROrientationEvidence {
   bestOrientation: CardinalOrientation;
   confidence: number;
   margin: number;
   scores: Record<CardinalOrientation, number>;
+  // Count of words Tesseract actually recognized text for at each
+  // orientation (empty/whitespace-only detection boxes are not counted).
+  // This is the real-content signal `resolveOcrOrientation` uses to reject
+  // an orientation before its `scores` entry is ever compared -- `scores`
+  // alone (confidence) is not sufficient, since a near-blank render can
+  // still produce a high confidence value.
+  wordCounts: Record<CardinalOrientation, number>;
 }
 
 const CARDINAL_ORIENTATIONS: CardinalOrientation[] = [0, 90, 180, 270];
@@ -56,6 +63,24 @@ const MIN_CONFIDENCE_MARGIN = 0.2;
 const MIN_RASTER_PAGES_FOR_DOMINANCE = 3;
 const MIN_DOMINANT_RASTER_RATIO = 0.8;
 const MIN_IMAGE_ASPECT_RATIO = 1.15;
+// Thresholds for the image-only OCR fallback. These are unchanged from the
+// previous implementation's inline literals (0.5 / 0.15) -- only their use
+// has been fixed so that failing to clear them means "needs-review", never
+// "normal".
+const OCR_MIN_CONFIDENCE = 0.5;
+const OCR_MIN_CONFIDENCE_MARGIN = 0.15;
+// Minimum number of actually-recognized words an orientation must have
+// before its confidence score is trusted at all. This exists because
+// Tesseract can report a high confidence (e.g. ~0.95) for a bounding box it
+// detected but recognized zero characters in -- confidence measures "how
+// sure am I this is a text region", not "how much real text did I actually
+// read". Without this floor, a near-blank render can outscore a page with
+// dozens of genuinely recognized words. This is an eligibility gate, not a
+// substitute for OCR_MIN_CONFIDENCE/OCR_MIN_CONFIDENCE_MARGIN below -- it
+// only decides which orientations are allowed to compete on confidence in
+// the first place. It is also never used to pick a winner by itself (word
+// count is not used to decide 0° vs 180°, only to reject non-candidates).
+const OCR_MIN_WORD_COUNT = 3;
 
 function normalizeAngle(angle: number): number {
   return ((angle % 360) + 360) % 360;
@@ -198,7 +223,7 @@ function correctionForPageRotation(
   );
 }
 
-function getRasterEvidence(
+export function getRasterEvidence(
   operatorList: { fnArray: number[]; argsArray: unknown[][] },
   imagePaintOperators: Set<number>,
 ): RasterEvidence | null {
@@ -244,6 +269,89 @@ function getRasterEvidence(
     orientation:
       largestImage.height > largestImage.width ? "portrait" : "landscape",
   };
+}
+
+/**
+ * Pure decision function for the image-only OCR fallback path.
+ *
+ * The critical rule: OCR that fails to confidently distinguish the four
+ * orientations must resolve to `needs-review`, never to `normal`. An
+ * inconclusive result is not evidence that the page is upright -- it is an
+ * absence of evidence either way.
+ *
+ * Decision order:
+ *   1. Reject any orientation whose recognized word count doesn't clear
+ *      `OCR_MIN_WORD_COUNT` -- a confidence score attached to essentially no
+ *      recognized text is not a real signal (see `OCR_MIN_WORD_COUNT`).
+ *   2. Among the orientations that survive step 1, pick the highest-scoring
+ *      one and compute its margin over the next-highest survivor.
+ *   3. Apply the existing `OCR_MIN_CONFIDENCE` / `OCR_MIN_CONFIDENCE_MARGIN`
+ *      thresholds to that winner, unchanged from before.
+ *
+ * Word count is only ever used to decide *eligibility* (step 1). It is never
+ * used to pick the winning orientation itself -- that is still decided by
+ * confidence score among eligible candidates, exactly as before.
+ *
+ * Exported (not just internal) so this decision logic can be unit-tested
+ * directly, without needing a real Tesseract/canvas/browser environment.
+ */
+export type OcrOrientationDecision =
+  | { kind: "rotated"; orientation: CardinalOrientation; confidence: number }
+  | { kind: "normal"; confidence: number }
+  | { kind: "needs-review" };
+
+export function resolveOcrOrientation(
+  ocrEvidence: OCROrientationEvidence | null,
+): OcrOrientationDecision {
+  if (!ocrEvidence) {
+    // OCR did not run or threw. We have no signal, positive or negative --
+    // that is not the same as "this page is normal".
+    return { kind: "needs-review" };
+  }
+
+  const { scores, wordCounts } = ocrEvidence;
+
+  // Step 1: reject candidates with insufficient actual recognized text
+  // before their confidence scores are compared at all. This is what stops
+  // a near-blank render's spuriously high confidence (e.g. one empty
+  // detection box scored ~0.95) from ever being treated as a real signal.
+  const eligibleOrientations = CARDINAL_ORIENTATIONS.filter(
+    (orientation) => wordCounts[orientation] >= OCR_MIN_WORD_COUNT,
+  );
+
+  if (eligibleOrientations.length === 0) {
+    // Nothing at any orientation had enough recognizable text to trust.
+    // That is not evidence the page is normal, and not evidence it's
+    // rotated -- there is simply no usable OCR signal here.
+    return { kind: "needs-review" };
+  }
+
+  // Step 2: pick the best-scoring eligible orientation and its margin over
+  // the next-best *eligible* orientation (rejected candidates don't count
+  // toward the margin either -- they were never real contenders).
+  const sortedEligible = [...eligibleOrientations].sort(
+    (first, second) => scores[second] - scores[first],
+  );
+  const bestOrientation = sortedEligible[0];
+  const confidence = scores[bestOrientation];
+  const secondBestScore =
+    sortedEligible.length > 1 ? scores[sortedEligible[1]] : 0;
+  const margin = confidence - secondBestScore;
+
+  // Step 3: the existing, unchanged confidence/margin thresholds.
+  const isConclusive =
+    confidence >= OCR_MIN_CONFIDENCE && margin >= OCR_MIN_CONFIDENCE_MARGIN;
+
+  if (!isConclusive) {
+    // Tied or near-tied scores (e.g. ~0.95/0.95/0.95 across 90/180/270):
+    // there is no reliable separation, so we cannot pick an orientation --
+    // including 0°/normal.
+    return { kind: "needs-review" };
+  }
+
+  return bestOrientation === 0
+    ? { kind: "normal", confidence }
+    : { kind: "rotated", orientation: bestOrientation, confidence };
 }
 
 /**
@@ -296,43 +404,32 @@ async function detectOrientationViaOCR(
     // Get canvas image data as image
     const imageData = canvas.toDataURL("image/png");
 
-    // Test OCR at multiple orientations
+    // Test OCR at multiple orientations. Each test also reports how many
+    // words Tesseract actually recognized text for at that orientation --
+    // `resolveOcrOrientation` uses that (not just the confidence score) to
+    // decide whether an orientation's score can be trusted at all.
     const scores: Record<CardinalOrientation, number> = {
       0: 0,
       90: 0,
       180: 0,
       270: 0,
     };
+    const wordCounts: Record<CardinalOrientation, number> = {
+      0: 0,
+      90: 0,
+      180: 0,
+      270: 0,
+    };
 
-    // Test 0° (original)
-    scores[0] = await testOrientation(
-      Tesseract.default,
-      imageData,
-      0,
-    );
+    for (const angle of CARDINAL_ORIENTATIONS) {
+      const result = await testOrientation(Tesseract.default, imageData, angle);
+      scores[angle] = result.confidence;
+      wordCounts[angle] = result.wordCount;
+    }
 
-    // Test 90° clockwise
-    scores[90] = await testOrientation(
-      Tesseract.default,
-      imageData,
-      90,
-    );
-
-    // Test 180° (upside down) - THIS IS KEY FOR PAGE 9
-    scores[180] = await testOrientation(
-      Tesseract.default,
-      imageData,
-      180,
-    );
-
-    // Test 270° clockwise
-    scores[270] = await testOrientation(
-      Tesseract.default,
-      imageData,
-      270,
-    );
-
-    // Find best orientation
+    // Find best orientation (raw, unfiltered -- used for diagnostics only;
+    // the actual decision in `resolveOcrOrientation` recomputes this after
+    // filtering out orientations with insufficient recognized text).
     const bestOrientation = (Object.keys(scores) as unknown as CardinalOrientation[]).reduce(
       (best, current) => (scores[current] > scores[best] ? current : best),
       0 as CardinalOrientation,
@@ -353,6 +450,7 @@ async function detectOrientationViaOCR(
       confidence,
       margin,
       scores,
+      wordCounts,
     };
   } finally {
     canvas.width = 0;
@@ -361,14 +459,26 @@ async function detectOrientationViaOCR(
 }
 
 /**
- * Tests OCR confidence at a specific rotation angle.
- * Returns confidence score (0-1) for how well text is readable at that angle.
+ * Tests OCR confidence and real recognized-word count at a specific rotation
+ * angle. Confidence alone is not trustworthy: Tesseract can report a high
+ * confidence for a detection box that contains no actual recognized text
+ * (an empty/whitespace string), so callers must also check `wordCount`
+ * before trusting `confidence` -- see `OCR_MIN_WORD_COUNT` and
+ * `resolveOcrOrientation`.
  */
 async function testOrientation(
-  TesseractModule: { recognize: (imageData: string, language: string, options: Record<string, unknown>) => Promise<{ data: { confidence: number } }> },
+  TesseractModule: {
+    recognize: (
+      imageData: string,
+      language: string,
+      options: Record<string, unknown>,
+    ) => Promise<{
+      data: { confidence: number; words?: { text?: string }[] };
+    }>;
+  },
   imageData: string,
   angle: number,
-): Promise<number> {
+): Promise<{ confidence: number; wordCount: number }> {
   try {
     // Create rotated version of image
     const rotatedImage = await rotateImageData(imageData, angle);
@@ -380,12 +490,21 @@ async function testOrientation(
       },
     });
 
-    // Return confidence (higher = more readable text)
+    // Confidence: higher = Tesseract is more sure a region is readable text.
     const confidence = result.data.confidence || 0;
-    return Math.min(confidence / 100, 1.0);
+
+    // Word count: how many of Tesseract's detected boxes actually contain
+    // recognized, non-whitespace text. A detection box with an empty string
+    // is not a word, regardless of how confident Tesseract was about it.
+    const wordCount = (result.data.words ?? []).filter(
+      (word) => (word.text ?? "").trim().length > 0,
+    ).length;
+
+    return { confidence: Math.min(confidence / 100, 1.0), wordCount };
   } catch {
-    // If OCR fails at this orientation, return 0 confidence
-    return 0;
+    // If OCR fails at this orientation, there is no confidence and no
+    // recognized text.
+    return { confidence: 0, wordCount: 0 };
   }
 }
 
@@ -556,51 +675,64 @@ export async function analyzePdfOrientation(
           }
 
           if (pageRasterEvidence && dominantRasterOrientation) {
-            // Use OCR to detect true orientation of image-only page
-            const ocrEvidence = await detectOrientationViaOCR(page);
-            
-            if (ocrEvidence) {
-              const { bestOrientation, confidence, margin } = ocrEvidence;
-              
-              // Strong confidence and meaningful margin between best and second-best
-              if (confidence >= 0.5 && margin >= 0.15) {
-                if (bestOrientation !== 0) {
-                  // Page needs rotation
-                  pages.push({
-                    pageNumber,
-                    detectedOrientation: bestOrientation,
-                    proposedCorrection: toCorrection(bestOrientation),
-                    confidence,
-                    status: "likely-rotated",
-                  });
-                  continue;
-                }
-              }
+            // This page's raster aspect ratio already matches the document's
+            // dominant orientation (the mismatch case was handled above), so
+            // OCR is the only remaining signal for a possible 180° flip.
+            // Use OCR to detect true orientation of image-only page. OCR
+            // itself may throw (e.g. a decode or worker failure); that is
+            // treated the same as "OCR returned nothing usable" below --
+            // it must not be allowed to crash the whole analysis, and it
+            // must not be treated as evidence the page is normal.
+            let ocrEvidence: OCROrientationEvidence | null;
+
+            try {
+              ocrEvidence = await detectOrientationViaOCR(page);
+            } catch (ocrError) {
+              console.error("Page orientation OCR error:", ocrError);
+              ocrEvidence = null;
             }
-            
-            // No strong OCR evidence, check aspect ratio mismatch
-            if (
-              pageRasterEvidence.orientation !== dominantRasterOrientation.orientation
-            ) {
-              // Aspect ratio outlier (90°/270° misalignment)
+
+            const decision = resolveOcrOrientation(ocrEvidence);
+
+            if (decision.kind === "rotated") {
               pages.push({
                 pageNumber,
-                detectedOrientation: null,
-                proposedCorrection: null,
-                confidence: dominantRasterOrientation.confidence,
-                status: "likely-misaligned",
-                rasterAssessment: "landscape-outlier",
+                detectedOrientation: decision.orientation,
+                proposedCorrection: toCorrection(decision.orientation),
+                confidence: decision.confidence,
+                status: "likely-rotated",
               });
               continue;
             }
-            
-            // Matches dominant orientation, assume normal
+
+            if (decision.kind === "normal") {
+              // OCR itself was confident this page reads correctly at 0°.
+              // Report OCR's own per-page confidence here -- not the
+              // document-level dominant-raster-orientation ratio, which
+              // measures how many pages share a raster aspect ratio, not
+              // whether this specific page is upright.
+              pages.push({
+                pageNumber,
+                detectedOrientation: 0,
+                proposedCorrection: null,
+                confidence: decision.confidence,
+                status: "normal",
+              });
+              continue;
+            }
+
+            // OCR was inconclusive (tied/near-tied scores, insufficient
+            // margin) or failed outright. Neither is evidence that the page
+            // is normal -- surface the uncertainty instead of silently
+            // reusing the document's dominant-raster confidence as if it
+            // were this page's own orientation confidence.
             pages.push({
               pageNumber,
-              detectedOrientation: 0,
+              detectedOrientation: null,
               proposedCorrection: null,
-              confidence: dominantRasterOrientation.confidence,
-              status: "normal",
+              confidence: 0,
+              status: "needs-review",
+              rasterAssessment: "inconclusive",
             });
             continue;
           }
