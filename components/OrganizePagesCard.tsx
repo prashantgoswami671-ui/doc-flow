@@ -24,7 +24,9 @@ import {
   getPageBoxes,
   renderCropEditorPreview,
   renderPageThumbnails,
+  renderSinglePagePreview,
   type CropEditorPreview,
+  type SinglePagePreview,
 } from "../services/pdf/thumbnails";
 
 const rotationOptions: { rotation: PageRotation; label: string }[] = [
@@ -205,6 +207,88 @@ export default function OrganizePagesCard() {
   const [draftCropPx, setDraftCropPx] = useState<PixelRect | null>(null);
   const [isApplyingCropToSelected, setIsApplyingCropToSelected] = useState(false);
 
+  // Large readable page preview modal state (reuses renderSinglePagePreview from Fix Page Orientation).
+  const singlePreviewRequestIdRef = useRef(0);
+  const previewImageCacheRef = useRef<Map<number, SinglePagePreview>>(new Map());
+  const [previewModalPageNumber, setPreviewModalPageNumber] = useState<number | null>(null);
+  const [previewImage, setPreviewImage] = useState<SinglePagePreview | null>(null);
+  const [isLoadingPreviewImage, setIsLoadingPreviewImage] = useState(false);
+  const [previewImageError, setPreviewImageError] = useState<string | null>(null);
+
+  const resetLargePreviewState = () => {
+    singlePreviewRequestIdRef.current += 1;
+    setPreviewModalPageNumber(null);
+    setPreviewImage(null);
+    setIsLoadingPreviewImage(false);
+    setPreviewImageError(null);
+  };
+
+  const loadLargePreviewImage = async (file: File, pageNumber: number) => {
+    const requestId = ++singlePreviewRequestIdRef.current;
+    setIsLoadingPreviewImage(true);
+    setPreviewImageError(null);
+
+    const cached = previewImageCacheRef.current.get(pageNumber);
+    if (cached) {
+      setPreviewImage(cached);
+      setIsLoadingPreviewImage(false);
+      return;
+    }
+
+    try {
+      const preview = await renderSinglePagePreview(file, pageNumber);
+
+      if (requestId !== singlePreviewRequestIdRef.current) return;
+
+      previewImageCacheRef.current.set(pageNumber, preview);
+      setPreviewImage(preview);
+    } catch (previewError) {
+      console.error("PDF page large preview error:", previewError);
+
+      if (requestId !== singlePreviewRequestIdRef.current) return;
+
+      setPreviewImageError(
+        previewError instanceof Error
+          ? `Unable to load a large preview: ${previewError.message}`
+          : "Unable to load a large preview of this page.",
+      );
+    } finally {
+      if (requestId === singlePreviewRequestIdRef.current) {
+        setIsLoadingPreviewImage(false);
+      }
+    }
+  };
+
+  const openPreviewModal = (sourcePageNumber: number) => {
+    setPreviewModalPageNumber(sourcePageNumber);
+    if (selectedFile) {
+      void loadLargePreviewImage(selectedFile, sourcePageNumber);
+    }
+  };
+
+  const closePreviewModal = () => {
+    singlePreviewRequestIdRef.current += 1;
+    setPreviewModalPageNumber(null);
+    setPreviewImage(null);
+    setIsLoadingPreviewImage(false);
+    setPreviewImageError(null);
+  };
+
+  // Dismiss the enlarged preview with Escape while it's open.
+  useEffect(() => {
+    if (previewModalPageNumber === null) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePreviewModal();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [previewModalPageNumber]);
+
   const resetEditorState = () => {
     editorRequestIdRef.current += 1;
     dragStateRef.current = null;
@@ -228,6 +312,8 @@ export default function OrganizePagesCard() {
     setSuccessMessage(null);
     setIsLoadingPreviews(false);
     setPreviewProgress("");
+    previewImageCacheRef.current.clear();
+    resetLargePreviewState();
     resetEditorState();
 
     if (fileInputRef.current) {
@@ -296,6 +382,8 @@ export default function OrganizePagesCard() {
     }
 
     previewRequestIdRef.current += 1;
+    previewImageCacheRef.current.clear();
+    resetLargePreviewState();
     setSelectedFile(file);
     setPages([]);
     setResult(null);
@@ -313,6 +401,14 @@ export default function OrganizePagesCard() {
           : page,
       ),
     );
+  };
+
+  const selectAllPages = () => {
+    setPages((current) => current.map((page) => ({ ...page, selected: true })));
+  };
+
+  const clearSelection = () => {
+    setPages((current) => current.map((page) => ({ ...page, selected: false })));
   };
 
   const rotateSelection = (rotation: PageRotation) => {
@@ -360,6 +456,7 @@ export default function OrganizePagesCard() {
    */
   const resetToOriginal = () => {
     setPages(initialPagesRef.current.map((page) => ({ ...page })));
+    resetLargePreviewState();
     resetEditorState();
     setResult(null);
     setError(null);
@@ -429,6 +526,20 @@ export default function OrganizePagesCard() {
     editorPageNumber !== null
       ? pages.find((page) => page.sourcePageNumber === editorPageNumber) ?? null
       : null;
+  const modalPageIndex =
+    previewModalPageNumber !== null
+      ? pages.findIndex((page) => page.sourcePageNumber === previewModalPageNumber)
+      : -1;
+  const modalPage = modalPageIndex !== -1 ? pages[modalPageIndex] : null;
+  const canGoPrev = modalPageIndex > 0;
+  const canGoNext = modalPageIndex !== -1 && modalPageIndex < pages.length - 1;
+
+  const goToAdjacentPage = (direction: -1 | 1) => {
+    if (modalPageIndex === -1) return;
+    const nextIndex = modalPageIndex + direction;
+    if (nextIndex < 0 || nextIndex >= pages.length) return;
+    openPreviewModal(pages[nextIndex].sourcePageNumber);
+  };
   const totalDisplayRotation: PageRotation = editorPreview
     ? normalizeRotation(editorPreview.pageRotation + (editorPage?.rotation ?? 0))
     : 0;
@@ -861,30 +972,48 @@ export default function OrganizePagesCard() {
           {pages.length > 0 && (
             <>
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-medium text-gray-700">
-                  {pages.length} page{pages.length === 1 ? "" : "s"} ·{" "}
-                  <span
-                    className={
-                      selectedCount > 0 ? "font-semibold text-blue-700" : ""
-                    }
-                  >
-                    {selectedCount} selected
-                  </span>
-                </p>
-                {selectedCount > 0 && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPages((current) =>
-                        current.map((page) => ({ ...page, selected: false })),
-                      )
-                    }
-                    disabled={isProcessing}
-                    className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:text-gray-400"
-                  >
-                    Clear selection
-                  </button>
-                )}
+                <div>
+                  <p className="text-sm font-medium text-gray-700">
+                    {pages.length} page{pages.length === 1 ? "" : "s"} ·{" "}
+                    <span
+                      className={
+                        selectedCount > 0 ? "font-semibold text-blue-700" : "text-gray-500"
+                      }
+                    >
+                      {selectedCount === 0
+                        ? "None selected"
+                        : selectedCount === 1
+                          ? `Page ${pages.find((p) => p.selected)?.sourcePageNumber} selected`
+                          : `${selectedCount} selected`}
+                    </span>
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Click to select · Double-click any page to preview full size
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {pages.length > 0 && selectedCount < pages.length && (
+                    <button
+                      type="button"
+                      onClick={selectAllPages}
+                      disabled={isProcessing}
+                      className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:text-gray-400"
+                    >
+                      Select all
+                    </button>
+                  )}
+                  {selectedCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearSelection}
+                      disabled={isProcessing}
+                      className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:text-gray-400"
+                    >
+                      Clear selection
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -895,7 +1024,19 @@ export default function OrganizePagesCard() {
                       type="button"
                       onClick={() => rotateSelection(option.rotation)}
                       disabled={selectedCount === 0 || isProcessing}
-                      className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
+                      aria-label={
+                        selectedCount === 1
+                          ? `Rotate page ${pages.find((p) => p.selected)?.sourcePageNumber} ${option.rotation}°`
+                          : selectedCount > 1
+                            ? `Rotate ${selectedCount} selected pages ${option.rotation}°`
+                            : option.label
+                      }
+                      title={
+                        selectedCount === 0
+                          ? "Select at least one page to rotate"
+                          : undefined
+                      }
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                     >
                       {option.label}
                     </button>
@@ -912,7 +1053,19 @@ export default function OrganizePagesCard() {
                     type="button"
                     onClick={() => markSelectedDeleted(true)}
                     disabled={selectedCount === 0 || isProcessing}
-                    className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
+                    aria-label={
+                      selectedCount === 1
+                        ? `Mark page ${pages.find((p) => p.selected)?.sourcePageNumber} for deletion`
+                        : selectedCount > 1
+                          ? `Mark ${selectedCount} selected pages for deletion`
+                          : "Mark for deletion"
+                    }
+                    title={
+                      selectedCount === 0
+                        ? "Select at least one page to mark for deletion"
+                        : undefined
+                    }
+                    className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
                   >
                     Mark for deletion
                   </button>
@@ -920,7 +1073,19 @@ export default function OrganizePagesCard() {
                     type="button"
                     onClick={() => markSelectedDeleted(false)}
                     disabled={selectedCount === 0 || isProcessing}
-                    className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
+                    aria-label={
+                      selectedCount === 1
+                        ? `Keep page ${pages.find((p) => p.selected)?.sourcePageNumber}`
+                        : selectedCount > 1
+                          ? `Keep ${selectedCount} selected pages`
+                          : "Keep pages"
+                    }
+                    title={
+                      selectedCount === 0
+                        ? "Select at least one page to keep"
+                        : undefined
+                    }
+                    className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                   >
                     Keep pages
                   </button>
@@ -954,28 +1119,54 @@ export default function OrganizePagesCard() {
                         setDraggedIndex(null);
                         setDropTargetIndex(null);
                       }}
-                      className={`flex flex-col rounded-lg border-2 p-2 transition-colors ${
+                      className={`group relative flex flex-col rounded-lg border-2 p-2 transition-all ${
                         draggedIndex === index ? "opacity-50" : ""
                       } ${
                         isDropTarget
-                          ? "border-blue-500 bg-blue-50"
-                          : page.deleted
-                            ? "border-red-400 bg-red-50"
-                            : page.selected
-                              ? "border-blue-500 bg-blue-50"
-                              : isEditorPage
-                                ? "border-purple-400 bg-purple-50/40"
-                                : "border-gray-200 bg-white"
+                          ? "border-blue-500 bg-blue-50 shadow-md"
+                          : page.deleted && page.selected
+                            ? "border-red-500 bg-red-100/80 ring-2 ring-red-400/30"
+                            : page.deleted
+                              ? "border-red-300 bg-red-50/70"
+                              : page.selected
+                                ? "border-blue-600 bg-blue-50/80 ring-2 ring-blue-500/20 shadow-xs"
+                                : isEditorPage
+                                  ? "border-purple-400 bg-purple-50/40 ring-2 ring-purple-300/30"
+                                  : "border-gray-200 bg-white hover:border-blue-300 hover:bg-gray-50/50 hover:shadow-xs"
                       }`}
                     >
                       <button
                         type="button"
                         aria-pressed={page.selected}
-                        aria-label={`Page ${page.sourcePageNumber}`}
+                        aria-label={`Page ${page.sourcePageNumber}${page.selected ? ", selected" : ""}. Double-click to preview full page.`}
+                        title={`Page ${page.sourcePageNumber} — click to select, double-click to view full page`}
                         onClick={() => toggleSelection(page.sourcePageNumber)}
+                        onDoubleClick={() => openPreviewModal(page.sourcePageNumber)}
                         disabled={isProcessing}
-                        className="flex h-28 w-full cursor-pointer items-center justify-center overflow-hidden rounded bg-gray-100"
+                        className={`relative flex h-28 w-full cursor-pointer items-center justify-center overflow-hidden rounded transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
+                          page.selected ? "bg-blue-100/50" : "bg-gray-100 hover:bg-gray-200/60"
+                        }`}
                       >
+                        <span
+                          aria-hidden="true"
+                          className={`absolute left-1.5 top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-md border text-xs font-bold transition-colors ${
+                            page.selected
+                              ? "border-blue-600 bg-blue-600 text-white shadow-xs"
+                              : "border-gray-300 bg-white/90 text-transparent group-hover:border-blue-400 group-hover:bg-white"
+                          }`}
+                        >
+                          {page.selected ? "✓" : ""}
+                        </span>
+
+                        {isEditorPage && (
+                          <span
+                            aria-hidden="true"
+                            className="absolute right-1.5 top-1.5 z-10 rounded bg-purple-600 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-xs"
+                          >
+                            Active
+                          </span>
+                        )}
+
                         {page.thumbnailDataUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
@@ -1004,15 +1195,17 @@ export default function OrganizePagesCard() {
                           aria-label={`Move page ${page.sourcePageNumber} earlier`}
                           onClick={() => reorder(index, index - 1)}
                           disabled={index === 0 || isProcessing}
-                          className="rounded px-1 text-xs text-gray-500 hover:bg-gray-100 disabled:text-gray-300"
+                          className="rounded px-1.5 py-0.5 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:cursor-not-allowed disabled:text-gray-300 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
                         >
                           ◀
                         </button>
                         <span
-                          className={`text-xs font-semibold ${
+                          className={`text-xs ${
                             page.deleted
-                              ? "text-red-700 line-through"
-                              : "text-gray-700"
+                              ? "font-semibold text-red-700 line-through"
+                              : page.selected
+                                ? "font-bold text-blue-900"
+                                : "font-semibold text-gray-700"
                           }`}
                         >
                           Page {page.sourcePageNumber}
@@ -1022,35 +1215,42 @@ export default function OrganizePagesCard() {
                           aria-label={`Move page ${page.sourcePageNumber} later`}
                           onClick={() => reorder(index, index + 1)}
                           disabled={index === pages.length - 1 || isProcessing}
-                          className="rounded px-1 text-xs text-gray-500 hover:bg-gray-100 disabled:text-gray-300"
+                          className="rounded px-1.5 py-0.5 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:cursor-not-allowed disabled:text-gray-300 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
                         >
                           ▶
                         </button>
                       </div>
 
-                      {page.rotation !== 0 && !page.deleted && (
-                        <p className="mt-0.5 text-center text-xs text-blue-700">
-                          {page.rotation}°
-                        </p>
-                      )}
-                      {page.crop && !page.deleted && (
-                        <p className="mt-0.5 text-center text-xs text-purple-700">
-                          Cropped
-                        </p>
-                      )}
-                      {page.deleted && (
-                        <p className="mt-0.5 text-center text-xs font-semibold text-red-700">
-                          Deleted
-                        </p>
-                      )}
+                      <div className="min-h-[18px] flex items-center justify-center gap-1 flex-wrap mt-0.5">
+                        {page.rotation !== 0 && !page.deleted && (
+                          <span className="inline-flex items-center text-[11px] font-medium text-blue-700">
+                            ↻ {page.rotation}°
+                          </span>
+                        )}
+                        {page.crop && !page.deleted && (
+                          <span className="inline-flex items-center text-[11px] font-medium text-purple-700">
+                            ✂ Cropped
+                          </span>
+                        )}
+                        {page.deleted && (
+                          <span className="inline-flex items-center text-[11px] font-bold text-red-700">
+                            ✕ Deleted
+                          </span>
+                        )}
+                      </div>
 
                       <button
                         type="button"
                         onClick={() => setEditorPageNumber(page.sourcePageNumber)}
                         disabled={isProcessing || page.deleted}
-                        className={`mt-1 w-full rounded px-1 py-0.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:text-gray-300 ${
+                        aria-label={
                           isEditorPage
-                            ? "bg-purple-600 text-white"
+                            ? `Currently editing page ${page.sourcePageNumber}`
+                            : `Edit crop and rotation for page ${page.sourcePageNumber}`
+                        }
+                        className={`mt-1 w-full rounded px-1 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 ${
+                          isEditorPage
+                            ? "bg-purple-600 text-white font-semibold shadow-xs"
                             : "border border-purple-200 bg-white text-purple-700 hover:bg-purple-50"
                         }`}
                       >
@@ -1400,6 +1600,184 @@ export default function OrganizePagesCard() {
           )}
         </div>
       </div>
+
+      {/* LARGE READABLE PAGE PREVIEW MODAL */}
+      {previewModalPageNumber !== null && modalPage && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Page ${modalPage.sourcePageNumber} preview`}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 sm:p-6"
+          onClick={closePreviewModal}
+        >
+          <div
+            className="relative flex flex-col max-h-[90vh] w-full max-w-4xl rounded-2xl bg-white shadow-2xl overflow-hidden"
+            onClick={(event) => event.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5 bg-gray-50/70">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <span className="text-base font-bold text-gray-900">
+                  Page {modalPageIndex + 1} of {pages.length}
+                </span>
+                {modalPage.sourcePageNumber !== modalPageIndex + 1 && (
+                  <span className="text-xs text-gray-500">
+                    (Original Page {modalPage.sourcePageNumber})
+                  </span>
+                )}
+                <div className="flex flex-wrap items-center gap-1.5 ml-1">
+                  {modalPage.selected && (
+                    <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                      ✓ Selected
+                    </span>
+                  )}
+                  {modalPage.rotation !== 0 && !modalPage.deleted && (
+                    <span className="rounded-full bg-blue-50 border border-blue-200 px-2 py-0.5 text-xs font-medium text-blue-700">
+                      ↻ {modalPage.rotation}° rotated
+                    </span>
+                  )}
+                  {modalPage.crop && !modalPage.deleted && (
+                    <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-700">
+                      ✂ Cropped
+                    </span>
+                  )}
+                  {modalPage.deleted && (
+                    <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-bold text-red-700">
+                      ✕ Marked for deletion
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={closePreviewModal}
+                aria-label="Close preview"
+                className="rounded-full p-1.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer"
+              >
+                <span className="text-xl font-bold leading-none">✕</span>
+              </button>
+            </div>
+
+            {/* Deletion Warning Banner in Modal */}
+            {modalPage.deleted && (
+              <div className="bg-red-50 border-b border-red-200 px-5 py-2.5 text-xs font-medium text-red-700 flex items-center justify-between">
+                <span>This page is marked for deletion and will be omitted when changes are applied.</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPages((current) =>
+                      current.map((p) =>
+                        p.sourcePageNumber === modalPage.sourcePageNumber
+                          ? { ...p, deleted: false }
+                          : p,
+                      ),
+                    );
+                  }}
+                  className="underline font-semibold hover:text-red-900 ml-2 cursor-pointer"
+                >
+                  Keep page
+                </button>
+              </div>
+            )}
+
+            {/* High-Resolution Content Area */}
+            <div className="flex-1 overflow-auto p-4 sm:p-6 flex items-center justify-center bg-gray-100/60 min-h-[320px]">
+              {isLoadingPreviewImage && (
+                <div className="flex flex-col items-center justify-center py-20 text-gray-500">
+                  <svg
+                    className="h-8 w-8 animate-spin text-blue-600 mb-3"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  <p className="text-sm font-medium text-gray-600">
+                    Loading high-resolution page content...
+                  </p>
+                </div>
+              )}
+
+              {previewImageError && (
+                <div className="py-12 text-center text-red-600 text-sm font-medium">
+                  {previewImageError}
+                </div>
+              )}
+
+              {!isLoadingPreviewImage && !previewImageError && previewImage && (
+                <div className="flex flex-col items-center justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={previewImage.dataUrl}
+                    alt={`Page ${modalPage.sourcePageNumber} large readable preview`}
+                    className={`max-h-[70vh] w-auto max-w-full object-contain rounded shadow-lg bg-white transition-transform duration-200 ${
+                      rotationClasses[modalPage.rotation]
+                    } ${modalPage.deleted ? "opacity-40" : ""}`}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer / Navigation */}
+            <div className="flex items-center justify-between border-t border-gray-100 px-5 py-3 bg-white">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => goToAdjacentPage(-1)}
+                  disabled={!canGoPrev || isProcessing}
+                  aria-label="Previous page"
+                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  ◀ Previous
+                </button>
+                <button
+                  type="button"
+                  onClick={() => goToAdjacentPage(1)}
+                  disabled={!canGoNext || isProcessing}
+                  aria-label="Next page"
+                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Next ▶
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => toggleSelection(modalPage.sourcePageNumber)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                    modalPage.selected
+                      ? "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                      : "bg-blue-600 text-white hover:bg-blue-700"
+                  }`}
+                >
+                  {modalPage.selected ? "Deselect page" : "Select page"}
+                </button>
+                <button
+                  type="button"
+                  onClick={closePreviewModal}
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -45,16 +45,28 @@ export default function PageThumbnailGrid({
             key={page.pageNumber}
             type="button"
             aria-pressed={selected}
-            aria-label={`Page ${page.pageNumber}`}
+            aria-label={`Page ${page.pageNumber}${selected ? ", selected" : ""}`}
             onClick={() => onPageClick?.(page)}
             disabled={disabled}
-            className={`flex flex-col rounded-lg border-2 p-2 transition-colors ${
+            className={`group relative flex flex-col rounded-lg border-2 p-2 text-left transition-all ${
+              disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+            } ${
               selected
-                ? "border-blue-500 bg-blue-50"
-                : "border-gray-200 bg-white"
-            }`}
+                ? "border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20 shadow-xs"
+                : "border-gray-200 bg-white hover:border-blue-300 hover:bg-gray-50/50 hover:shadow-xs"
+            } focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2`}
           >
-            <span className="flex h-28 w-full items-center justify-center overflow-hidden rounded bg-gray-100">
+            <span className="relative flex h-28 w-full items-center justify-center overflow-hidden rounded bg-gray-100">
+              <span
+                aria-hidden="true"
+                className={`absolute left-1.5 top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-md border text-xs font-bold transition-colors ${
+                  selected
+                    ? "border-blue-600 bg-blue-600 text-white shadow-xs"
+                    : "border-gray-300 bg-white/90 text-transparent group-hover:border-blue-400 group-hover:bg-white"
+                }`}
+              >
+                {selected ? "✓" : ""}
+              </span>
               {page.dataUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -66,7 +78,11 @@ export default function PageThumbnailGrid({
                 <span className="text-xs text-gray-500">Preview off</span>
               )}
             </span>
-            <span className="mt-2 text-center text-xs font-semibold text-gray-700">
+            <span
+              className={`mt-2 text-center text-xs ${
+                selected ? "font-bold text-blue-900" : "font-semibold text-gray-700"
+              }`}
+            >
               Page {page.pageNumber}
             </span>
           </button>
