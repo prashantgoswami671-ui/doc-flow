@@ -32,7 +32,14 @@ export async function rasterizePDF(
   file: File,
   mode: RasterCompressionMode,
 ): Promise<Uint8Array> {
-  return rasterizePDFWithSettings(file, getSettings(mode));
+  // Light/Heavy compression must release PDF.js resources (page/canvas
+  // cleanup, pdf.cleanup(), loadingTask.destroy()) exactly like the Custom
+  // mode path already does below — otherwise every page render in this
+  // mode leaks. This does not change scale, quality, or the encoded bytes
+  // for any page: `releaseResources` only switches the JPEG-encode call
+  // from canvas.toDataURL()+fetch() to the equivalent canvas.toBlob(), and
+  // adds the same finally-block cleanup already used elsewhere.
+  return rasterizePDFWithSettings(file, getSettings(mode), true);
 }
 
 export async function rasterizePDFWithSettings(
@@ -70,8 +77,8 @@ export async function rasterizePDFWithSettings(
 
       const canvas = document.createElement("canvas");
 
-      canvas.width = Math.ceil(viewport.width);
-      canvas.height = Math.ceil(viewport.height);
+      canvas.width = Math.max(1, Math.ceil(viewport.width));
+      canvas.height = Math.max(1, Math.ceil(viewport.height));
 
       const context = canvas.getContext("2d");
 

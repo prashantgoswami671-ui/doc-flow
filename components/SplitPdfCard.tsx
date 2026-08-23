@@ -52,6 +52,7 @@ function createField(value = ""): SplitPointField {
 
 export default function SplitPdfCard() {
   const isProcessingRef = useRef(false);
+  const pageCountRequestIdRef = useRef(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [isReadingFile, setIsReadingFile] = useState(false);
@@ -77,6 +78,7 @@ export default function SplitPdfCard() {
     if (uploadDisabled || !file) return;
 
     if (!isPdfFile(file)) {
+      pageCountRequestIdRef.current += 1;
       setSelectedFile(null);
       setPageCount(null);
       setParts([]);
@@ -84,6 +86,8 @@ export default function SplitPdfCard() {
       setError("Please select a valid PDF file.");
       return;
     }
+
+    const requestId = ++pageCountRequestIdRef.current;
 
     setSelectedFile(file);
     setPageCount(null);
@@ -96,16 +100,25 @@ export default function SplitPdfCard() {
     try {
       const count = await getPdfPageCount(file);
 
+      // A newer file may have been selected while this read was in flight —
+      // never let a stale count overwrite state belonging to that newer file.
+      if (requestId !== pageCountRequestIdRef.current) return;
+
       setPageCount(count);
     } catch (readError) {
       console.error("PDF read error:", readError);
+
+      if (requestId !== pageCountRequestIdRef.current) return;
+
       setError(
         readError instanceof Error
           ? `Unable to read this PDF: ${readError.message}`
           : "Unable to read this PDF.",
       );
     } finally {
-      setIsReadingFile(false);
+      if (requestId === pageCountRequestIdRef.current) {
+        setIsReadingFile(false);
+      }
     }
   };
 
@@ -197,6 +210,7 @@ export default function SplitPdfCard() {
 
   /** Clears the current file/split points/result so the user can split a different PDF. */
   const handleSplitAnother = () => {
+    pageCountRequestIdRef.current += 1;
     setSelectedFile(null);
     setPageCount(null);
     setSplitPointFields([createField()]);

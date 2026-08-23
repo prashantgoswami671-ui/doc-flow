@@ -31,8 +31,18 @@ export async function mergePdfs(files: File[]): Promise<MergeResult> {
     try {
       const sourceBytes = await file.arrayBuffer();
       sourcePdf = await PDFDocument.load(sourceBytes);
-    } catch {
-      throw new Error(`"${file.name}" could not be read as a PDF.`);
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : "";
+
+      if (/encrypt/i.test(message)) {
+        throw new Error(
+          `"${file.name}" is password protected. Use Unlock PDF first, then merge the unlocked file.`,
+        );
+      }
+
+      throw new Error(
+        `"${file.name}" could not be read as a PDF. It may be corrupted or not a valid PDF file.`,
+      );
     }
 
     const pageIndices = sourcePdf.getPageIndices();

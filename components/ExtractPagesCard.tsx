@@ -43,6 +43,7 @@ const MAX_LISTED_PAGE_NUMBERS = 20;
 
 export default function ExtractPagesCard() {
   const isProcessingRef = useRef(false);
+  const pageCountRequestIdRef = useRef(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [isReadingFile, setIsReadingFile] = useState(false);
@@ -55,12 +56,15 @@ export default function ExtractPagesCard() {
     if (!file) return;
 
     if (!isPdfFile(file)) {
+      pageCountRequestIdRef.current += 1;
       setSelectedFile(null);
       setPageCount(null);
       setResult(null);
       setError("Please select a valid PDF file.");
       return;
     }
+
+    const requestId = ++pageCountRequestIdRef.current;
 
     setSelectedFile(file);
     setPageCount(null);
@@ -72,16 +76,25 @@ export default function ExtractPagesCard() {
     try {
       const count = await getPdfPageCount(file);
 
+      // A newer file may have been selected while this read was in flight —
+      // never let a stale count overwrite state belonging to that newer file.
+      if (requestId !== pageCountRequestIdRef.current) return;
+
       setPageCount(count);
     } catch (readError) {
       console.error("PDF read error:", readError);
+
+      if (requestId !== pageCountRequestIdRef.current) return;
+
       setError(
         readError instanceof Error
           ? `Unable to read this PDF: ${readError.message}`
           : "Unable to read this PDF.",
       );
     } finally {
-      setIsReadingFile(false);
+      if (requestId === pageCountRequestIdRef.current) {
+        setIsReadingFile(false);
+      }
     }
   };
 
@@ -133,6 +146,7 @@ export default function ExtractPagesCard() {
 
   /** Clears the current file/selection/result so the user can extract from a different PDF. */
   const handleExtractAnother = () => {
+    pageCountRequestIdRef.current += 1;
     setSelectedFile(null);
     setPageCount(null);
     setPageSelection("");

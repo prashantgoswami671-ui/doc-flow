@@ -128,6 +128,8 @@ function PdfPicker({
 
 export default function InsertPagesCard() {
   const isProcessingRef = useRef(false);
+  const targetPageCountRequestIdRef = useRef(0);
+  const sourcePageCountRequestIdRef = useRef(0);
 
   const [targetFile, setTargetFile] = useState<File | null>(null);
   const [targetPageCount, setTargetPageCount] = useState<number | null>(null);
@@ -150,6 +152,8 @@ export default function InsertPagesCard() {
   };
 
   const resetAll = () => {
+    targetPageCountRequestIdRef.current += 1;
+    sourcePageCountRequestIdRef.current += 1;
     setTargetFile(null);
     setTargetPageCount(null);
     setSourceFile(null);
@@ -166,9 +170,12 @@ export default function InsertPagesCard() {
     if (!file) return;
 
     if (!isPdfFile(file)) {
+      targetPageCountRequestIdRef.current += 1;
       setError("Please select a valid PDF file for the target.");
       return;
     }
+
+    const requestId = ++targetPageCountRequestIdRef.current;
 
     setTargetFile(file);
     setTargetPageCount(null);
@@ -178,16 +185,27 @@ export default function InsertPagesCard() {
 
     try {
       const count = await getPdfPageCount(file);
+
+      // A newer target file may have been selected while this read was in
+      // flight — never let a stale count overwrite state belonging to that
+      // newer file.
+      if (requestId !== targetPageCountRequestIdRef.current) return;
+
       setTargetPageCount(count);
     } catch (readError) {
       console.error("Target PDF read error:", readError);
+
+      if (requestId !== targetPageCountRequestIdRef.current) return;
+
       setError(
         readError instanceof Error
           ? `Unable to read the target PDF: ${readError.message}`
           : "Unable to read the target PDF.",
       );
     } finally {
-      setIsReadingTarget(false);
+      if (requestId === targetPageCountRequestIdRef.current) {
+        setIsReadingTarget(false);
+      }
     }
   };
 
@@ -195,9 +213,12 @@ export default function InsertPagesCard() {
     if (!file) return;
 
     if (!isPdfFile(file)) {
+      sourcePageCountRequestIdRef.current += 1;
       setError("Please select a valid PDF file for the source.");
       return;
     }
+
+    const requestId = ++sourcePageCountRequestIdRef.current;
 
     setSourceFile(file);
     setSourcePageCount(null);
@@ -206,16 +227,27 @@ export default function InsertPagesCard() {
 
     try {
       const count = await getPdfPageCount(file);
+
+      // A newer source file may have been selected while this read was in
+      // flight — never let a stale count overwrite state belonging to that
+      // newer file.
+      if (requestId !== sourcePageCountRequestIdRef.current) return;
+
       setSourcePageCount(count);
     } catch (readError) {
       console.error("Source PDF read error:", readError);
+
+      if (requestId !== sourcePageCountRequestIdRef.current) return;
+
       setError(
         readError instanceof Error
           ? `Unable to read the source PDF: ${readError.message}`
           : "Unable to read the source PDF.",
       );
     } finally {
-      setIsReadingSource(false);
+      if (requestId === sourcePageCountRequestIdRef.current) {
+        setIsReadingSource(false);
+      }
     }
   };
 

@@ -49,6 +49,38 @@ export function validatePagesToDelete(
 }
 
 /**
+ * Loads a PDF via pdf-lib, translating an encrypted source into a clear,
+ * actionable message instead of pdf-lib's generic load error. Mirrors the
+ * encryption-detection pattern already used by compress.ts / protect.ts /
+ * unlock.ts / repairValidate.ts.
+ */
+async function loadDeleteSourceOrThrow(file: File): Promise<PDFDocument> {
+  let sourceBytes: ArrayBuffer;
+
+  try {
+    sourceBytes = await file.arrayBuffer();
+  } catch {
+    throw new Error(`"${file.name}" could not be read.`);
+  }
+
+  try {
+    return await PDFDocument.load(sourceBytes);
+  } catch (loadError) {
+    const message = loadError instanceof Error ? loadError.message : "";
+
+    if (/encrypt/i.test(message)) {
+      throw new Error(
+        `"${file.name}" is password protected. Use Unlock PDF first, then delete pages from the unlocked file.`,
+      );
+    }
+
+    throw new Error(
+      `"${file.name}" could not be read as a PDF. It may be corrupted or not a valid PDF file.`,
+    );
+  }
+}
+
+/**
  * Removes the selected pages and returns a new PDF with the remaining pages
  * in their original order. The uploaded file is never modified in place.
  */
@@ -57,8 +89,7 @@ export async function deletePages(
   pageNumbers: Iterable<number>,
 ): Promise<DeletePagesResult> {
   const startTime = performance.now();
-  const sourceBytes = await file.arrayBuffer();
-  const pdf = await PDFDocument.load(sourceBytes);
+  const pdf = await loadDeleteSourceOrThrow(file);
   const originalPageCount = pdf.getPageCount();
   const deletedPageNumbers = validatePagesToDelete(
     pageNumbers,

@@ -56,8 +56,18 @@ export async function insertPages(
   try {
     const targetBytes = await targetFile.arrayBuffer();
     targetPdf = await PDFDocument.load(targetBytes);
-  } catch {
-    throw new Error(`"${targetFile.name}" could not be read as a PDF.`);
+  } catch (loadError) {
+    const message = loadError instanceof Error ? loadError.message : "";
+
+    if (/encrypt/i.test(message)) {
+      throw new Error(
+        `"${targetFile.name}" is password protected. Use Unlock PDF first, then insert pages into the unlocked file.`,
+      );
+    }
+
+    throw new Error(
+      `"${targetFile.name}" could not be read as a PDF. It may be corrupted or not a valid PDF file.`,
+    );
   }
 
   let sourcePdf: PDFDocument;
@@ -65,8 +75,18 @@ export async function insertPages(
   try {
     const sourceBytes = await sourceFile.arrayBuffer();
     sourcePdf = await PDFDocument.load(sourceBytes);
-  } catch {
-    throw new Error(`"${sourceFile.name}" could not be read as a PDF.`);
+  } catch (loadError) {
+    const message = loadError instanceof Error ? loadError.message : "";
+
+    if (/encrypt/i.test(message)) {
+      throw new Error(
+        `"${sourceFile.name}" is password protected. Use Unlock PDF first, then insert pages from the unlocked file.`,
+      );
+    }
+
+    throw new Error(
+      `"${sourceFile.name}" could not be read as a PDF. It may be corrupted or not a valid PDF file.`,
+    );
   }
 
   const targetPageCount = targetPdf.getPageCount();

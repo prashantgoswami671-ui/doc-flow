@@ -96,14 +96,45 @@ export function parsePageSelection(
   return pageNumbers;
 }
 
+/**
+ * Loads a PDF via pdf-lib, translating an encrypted source into a clear,
+ * actionable message instead of pdf-lib's generic load error. Mirrors the
+ * encryption-detection pattern already used by compress.ts / protect.ts /
+ * unlock.ts / repairValidate.ts.
+ */
+async function loadExtractSourceOrThrow(file: File): Promise<PDFDocument> {
+  let sourceBytes: ArrayBuffer;
+
+  try {
+    sourceBytes = await file.arrayBuffer();
+  } catch {
+    throw new Error(`"${file.name}" could not be read.`);
+  }
+
+  try {
+    return await PDFDocument.load(sourceBytes);
+  } catch (loadError) {
+    const message = loadError instanceof Error ? loadError.message : "";
+
+    if (/encrypt/i.test(message)) {
+      throw new Error(
+        `"${file.name}" is password protected. Use Unlock PDF first, then extract pages from the unlocked file.`,
+      );
+    }
+
+    throw new Error(
+      `"${file.name}" could not be read as a PDF. It may be corrupted or not a valid PDF file.`,
+    );
+  }
+}
+
 /** Extracts selected pages without rasterizing or changing their page content. */
 export async function extractPages(
   file: File,
   pageSelection: string,
 ): Promise<ExtractionResult> {
   const startTime = performance.now();
-  const sourceBytes = await file.arrayBuffer();
-  const sourcePdf = await PDFDocument.load(sourceBytes);
+  const sourcePdf = await loadExtractSourceOrThrow(file);
   const sourcePageCount = sourcePdf.getPageCount();
   const selectedPageNumbers = parsePageSelection(pageSelection, sourcePageCount);
 

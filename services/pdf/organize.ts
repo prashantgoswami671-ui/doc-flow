@@ -304,6 +304,49 @@ function validateOperations(
 }
 
 /**
+ * Loads a PDF via pdf-lib, translating an encrypted source into a clear,
+ * actionable message instead of pdf-lib's generic load error. Mirrors the
+ * encryption-detection pattern already used by compress.ts / protect.ts /
+ * unlock.ts / repairValidate.ts.
+ */
+async function loadOrganizeSourceOrThrow(file: File): Promise<PDFDocument> {
+  let sourceBytes: ArrayBuffer;
+
+  try {
+    sourceBytes = await file.arrayBuffer();
+  } catch {
+    throw new Error(`"${file.name}" could not be read.`);
+  }
+
+  try {
+    return await PDFDocument.load(sourceBytes);
+  } catch (loadError) {
+    const message = loadError instanceof Error ? loadError.message : "";
+
+    if (/encrypt/i.test(message)) {
+      throw new Error(
+        `"${file.name}" is password protected. Use Unlock PDF first, then organize the unlocked file.`,
+      );
+    }
+
+    throw new Error(
+      `"${file.name}" could not be read as a PDF. It may be corrupted or not a valid PDF file.`,
+    );
+  }
+}
+
+/**
+ * Probes a file with pdf-lib before pdf.js ever touches it for page
+ * previews. Organize's preview step (`renderPageThumbnails`, PDF.js-based)
+ * runs before any call to `organizePages` below, so without this check an
+ * encrypted PDF would surface PDF.js's opaque password error at the
+ * preview stage instead of a clear, actionable one.
+ */
+export async function assertOrganizablePdf(file: File): Promise<void> {
+  await loadOrganizeSourceOrThrow(file);
+}
+
+/**
  * Applies deletions, rotations, crops, and reordering to the uploaded PDF in
  * a single pass over one document.
  *
@@ -319,8 +362,7 @@ export async function organizePages(
   operations: PageOperation[],
 ): Promise<OrganizeResult> {
   const startTime = performance.now();
-  const sourceBytes = await file.arrayBuffer();
-  const pdf = await PDFDocument.load(sourceBytes);
+  const pdf = await loadOrganizeSourceOrThrow(file);
   const originalPageCount = pdf.getPageCount();
 
   validateOperations(operations, originalPageCount);

@@ -26,12 +26,28 @@ function toDisplayString(value: string | undefined): string {
 }
 
 async function loadPdf(file: File): Promise<PDFDocument> {
-  try {
-    const bytes = await file.arrayBuffer();
+  let bytes: ArrayBuffer;
 
-    return await PDFDocument.load(bytes);
+  try {
+    bytes = await file.arrayBuffer();
   } catch {
-    throw new Error(`"${file.name}" could not be read as a PDF.`);
+    throw new Error(`"${file.name}" could not be read.`);
+  }
+
+  try {
+    return await PDFDocument.load(bytes);
+  } catch (loadError) {
+    const message = loadError instanceof Error ? loadError.message : "";
+
+    if (/encrypt/i.test(message)) {
+      throw new Error(
+        `"${file.name}" is password protected. Use Unlock PDF first, then edit metadata on the unlocked file.`,
+      );
+    }
+
+    throw new Error(
+      `"${file.name}" could not be read as a PDF. It may be corrupted or not a valid PDF file.`,
+    );
   }
 }
 

@@ -19,10 +19,41 @@ export interface SplitResult {
   processingTime: number;
 }
 
+/**
+ * Loads a PDF via pdf-lib, translating an encrypted source into a clear,
+ * actionable message instead of pdf-lib's generic load error. Mirrors the
+ * encryption-detection pattern already used by compress.ts / protect.ts /
+ * unlock.ts / repairValidate.ts.
+ */
+async function loadSplitSourceOrThrow(file: File): Promise<PDFDocument> {
+  let sourceBytes: ArrayBuffer;
+
+  try {
+    sourceBytes = await file.arrayBuffer();
+  } catch {
+    throw new Error(`"${file.name}" could not be read.`);
+  }
+
+  try {
+    return await PDFDocument.load(sourceBytes);
+  } catch (loadError) {
+    const message = loadError instanceof Error ? loadError.message : "";
+
+    if (/encrypt/i.test(message)) {
+      throw new Error(
+        `"${file.name}" is password protected. Use Unlock PDF first, then split the unlocked file.`,
+      );
+    }
+
+    throw new Error(
+      `"${file.name}" could not be read as a PDF. It may be corrupted or not a valid PDF file.`,
+    );
+  }
+}
+
 /** Reads the page count of a PDF without modifying it. */
 export async function getPdfPageCount(file: File): Promise<number> {
-  const sourceBytes = await file.arrayBuffer();
-  const pdf = await PDFDocument.load(sourceBytes);
+  const pdf = await loadSplitSourceOrThrow(file);
 
   return pdf.getPageCount();
 }
@@ -120,8 +151,7 @@ export async function splitPdf(
   splitPoints: number[],
 ): Promise<SplitResult> {
   const startTime = performance.now();
-  const sourceBytes = await file.arrayBuffer();
-  const sourcePdf = await PDFDocument.load(sourceBytes);
+  const sourcePdf = await loadSplitSourceOrThrow(file);
   const sourcePageCount = sourcePdf.getPageCount();
 
   // Re-validate against the actual loaded document, in case the caller's

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  assertOrganizablePdf,
   buildPageOperations,
   clampCropToPageBox,
   createManagedPages,
@@ -242,6 +243,11 @@ export default function OrganizePagesCard() {
     setPages([]);
 
     try {
+      // Probe with pdf-lib first so an encrypted PDF gets a clear message
+      // here, instead of PDF.js's opaque password error partway through
+      // rendering thumbnails below.
+      await assertOrganizablePdf(file);
+
       const thumbnails = await renderPageThumbnails(file, {
         onProgress: (progress) => {
           if (requestId === previewRequestIdRef.current) {
@@ -275,8 +281,13 @@ export default function OrganizePagesCard() {
     }
   };
 
+  // Uploading/replacing the PDF must be locked out while previews are
+  // still loading or while Apply is running, so a new selection can never
+  // race with in-flight preview rendering or clobber a file mid-apply.
+  const uploadDisabled = isLoadingPreviews || isProcessing;
+
   const selectFile = (file: File | undefined) => {
-    if (!file) return;
+    if (uploadDisabled || !file) return;
 
     if (!isPdfFile(file)) {
       resetState();
@@ -769,6 +780,7 @@ export default function OrganizePagesCard() {
           type="file"
           accept=".pdf,application/pdf"
           className="hidden"
+          disabled={uploadDisabled}
           onChange={(event) => {
             selectFile(event.target.files?.[0]);
             event.target.value = "";
@@ -777,32 +789,53 @@ export default function OrganizePagesCard() {
 
         <div
           role="button"
-          tabIndex={0}
-          onClick={() => fileInputRef.current?.click()}
+          tabIndex={uploadDisabled ? -1 : 0}
+          aria-disabled={uploadDisabled}
+          onClick={() => {
+            if (!uploadDisabled) fileInputRef.current?.click();
+          }}
           onKeyDown={(event) => {
+            if (uploadDisabled) return;
+
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               fileInputRef.current?.click();
             }
           }}
-          onDragEnter={() => setIsDragging(true)}
+          onDragEnter={() => {
+            if (!uploadDisabled) setIsDragging(true);
+          }}
           onDragLeave={() => setIsDragging(false)}
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
             event.preventDefault();
             setIsDragging(false);
-            selectFile(event.dataTransfer.files?.[0]);
+            if (!uploadDisabled) selectFile(event.dataTransfer.files?.[0]);
           }}
-          className={`mx-4 sm:mx-6 mt-6 mb-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors cursor-pointer ${
-            isDragging
-              ? "border-blue-500 bg-blue-50"
-              : "border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
+          className={`mx-4 sm:mx-6 mt-6 mb-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors ${
+            uploadDisabled
+              ? "cursor-not-allowed border-gray-200 bg-gray-100"
+              : `cursor-pointer ${
+                  isDragging
+                    ? "border-blue-500 bg-blue-50"
+                    : "border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
+                }`
           }`}
         >
-          <p className="text-base font-medium text-gray-800 text-center">
-            Choose a PDF to organize
+          <p
+            className={`text-base font-medium text-center ${
+              uploadDisabled ? "text-gray-400" : "text-gray-800"
+            }`}
+          >
+            {uploadDisabled
+              ? isProcessing
+                ? "Upload locked while changes are being applied"
+                : "Upload locked while previews are loading"
+              : "Choose a PDF to organize"}
           </p>
-          <p className="mt-1 text-sm text-gray-500">or drag and drop it here</p>
+          <p className="mt-1 text-sm text-gray-500">
+            {uploadDisabled ? "Please wait for the current step to finish." : "or drag and drop it here"}
+          </p>
         </div>
 
         <div className="px-4 sm:px-6 pb-6">

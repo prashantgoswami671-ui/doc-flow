@@ -29,6 +29,38 @@ function normalizeRotation(angle: number): number {
   return ((angle % 360) + 360) % 360;
 }
 
+/**
+ * Loads a PDF via pdf-lib, translating an encrypted source into a clear,
+ * actionable message instead of pdf-lib's generic load error. Mirrors the
+ * encryption-detection pattern already used by compress.ts / protect.ts /
+ * unlock.ts / repairValidate.ts.
+ */
+async function loadRotateSourceOrThrow(file: File): Promise<PDFDocument> {
+  let sourceBytes: ArrayBuffer;
+
+  try {
+    sourceBytes = await file.arrayBuffer();
+  } catch {
+    throw new Error(`"${file.name}" could not be read.`);
+  }
+
+  try {
+    return await PDFDocument.load(sourceBytes);
+  } catch (loadError) {
+    const message = loadError instanceof Error ? loadError.message : "";
+
+    if (/encrypt/i.test(message)) {
+      throw new Error(
+        `"${file.name}" is password protected. Use Unlock PDF first, then rotate the unlocked file.`,
+      );
+    }
+
+    throw new Error(
+      `"${file.name}" could not be read as a PDF. It may be corrupted or not a valid PDF file.`,
+    );
+  }
+}
+
 function applyRelativeRotation(
   page: { getRotation: () => { angle: number }; setRotation: (rotation: ReturnType<typeof degrees>) => void },
   requestedRotation: RotationDegrees,
@@ -52,8 +84,7 @@ export async function applyPageRotations(
   }
 
   const startTime = performance.now();
-  const sourceBytes = await file.arrayBuffer();
-  const pdfDocument = await PDFDocument.load(sourceBytes);
+  const pdfDocument = await loadRotateSourceOrThrow(file);
   const pages = pdfDocument.getPages();
   const correctedPages = new Set<number>();
 
@@ -103,8 +134,7 @@ export async function rotatePDF(
   }
 
   const startTime = performance.now();
-  const sourceBytes = await file.arrayBuffer();
-  const pdfDocument = await PDFDocument.load(sourceBytes);
+  const pdfDocument = await loadRotateSourceOrThrow(file);
   const pages = pdfDocument.getPages();
 
   for (const page of pages) {

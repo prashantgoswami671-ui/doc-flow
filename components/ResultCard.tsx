@@ -135,7 +135,7 @@ export default function ResultCard({
 
         <Stat
           title="⚡ Processing Time"
-          value={`${processingTime.toFixed(2)} sec`}
+          value={`${(processingTime / 1000).toFixed(2)} sec`}
         />
 
         <Stat title="⚙️ Mode" value={formatModeLabel(mode)} />
