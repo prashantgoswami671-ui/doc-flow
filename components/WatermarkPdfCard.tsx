@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { parsePageSelection } from "../services/pdf/extract";
 import {
   applyWatermarkAndPageNumbers,
+  formatPageNumber,
   getWatermarkTargetPageCount,
   PAGE_NUMBER_DEFAULTS,
   WATERMARK_DEFAULTS,
@@ -216,14 +217,7 @@ export default function WatermarkPdfCard() {
   const pageNumberPreviewLabel = (() => {
     if (!pageNumbersEnabled || numberedPageCountPreview === 0) return null;
 
-    switch (pageNumberFormat) {
-      case "number":
-        return String(startingNumber);
-      case "page-number":
-        return `Page ${startingNumber}`;
-      case "page-number-of-total":
-        return `Page ${startingNumber} of ${lastPageNumberPreview}`;
-    }
+    return formatPageNumber(pageNumberFormat, startingNumber, lastPageNumberPreview);
   })();
 
   const canApply =
@@ -442,6 +436,7 @@ export default function WatermarkPdfCard() {
                     pageNumberFontSize={pageNumberFontSize}
                     pageRangeMode={pageRangeMode}
                     selectedPagesPreview={selectedPagesPreview}
+                    pageSelectionError={pageSelectionError}
                   />
                 </div>
               </div>

@@ -31,6 +31,10 @@ interface Props {
   pageNumberFontSize: number;
   pageRangeMode: "all" | "selected";
   selectedPagesPreview: number[] | null;
+  /** Set when pageRangeMode is "selected" and the raw input failed to
+   * parse, so the preview can tell an invalid selection apart from a
+   * valid one that simply excludes the current page. */
+  pageSelectionError?: string | null;
   maxDimension?: number;
 }
 
@@ -50,14 +54,28 @@ export default function PdfWatermarkPreview({
   pageNumberFontSize,
   pageRangeMode,
   selectedPagesPreview,
+  pageSelectionError = null,
   maxDimension = 700,
 }: Props) {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
   const [pageWidthPts, setPageWidthPts] = useState<number | null>(null);
   const [pageHeightPts, setPageHeightPts] = useState<number | null>(null);
+  // Raw (un-rotated) page dimensions and the page's own /Rotate value.
+  // pdf-lib's getWidth()/getHeight() (used to compute the real watermark's
+  // position) always report the un-rotated MediaBox — but pdfjs-dist's
+  // getViewport({scale}) applies the page's /Rotate by default, so the
+  // rendered canvas (and pageWidthPts/pageHeightPts above) reflect the
+  // *rotated* display size instead. These extra values let the overlay
+  // anchor itself in the same un-rotated space pdf-lib uses, then map that
+  // point into the rotated canvas's own coordinate space (see the rotation
+  // switch inside toOverlayStyleForText) instead of assuming the two
+  // spaces are the same.
+  const [rawPageWidthPts, setRawPageWidthPts] = useState<number | null>(null);
+  const [rawPageHeightPts, setRawPageHeightPts] = useState<number | null>(null);
+  const [pageRotation, setPageRotation] = useState(0);
 
   const pdfRef = useRef<object | null>(null);
   const loadingTaskRef = useRef<object | null>(null);
@@ -66,6 +84,13 @@ export default function PdfWatermarkPreview({
   async function renderPage(pageNumber: number) {
     if (!pdfRef.current || !loadingTaskRef.current) return;
     if (pageNumber < 1 || pageNumber > pageCount) return;
+
+    // Cancel any render still in flight before starting this one, so an
+    // older render can never win a race against a newer one (e.g. rapid
+    // Previous/Next clicks) and overwrite the canvas with a stale page.
+    if (currentRenderController.current) {
+      currentRenderController.current.cancelled = true;
+    }
 
     const controller = { cancelled: false };
     currentRenderController.current = controller;
@@ -77,9 +102,10 @@ export default function PdfWatermarkPreview({
       const pageObj = await pdf.getPage(pageNumber);
       const page = pageObj as {
         cleanup?: () => void;
-        getViewport: (opts: { scale: number }) => {
+        getViewport: (opts: { scale: number; rotation?: number }) => {
           width: number;
           height: number;
+          rotation: number;
         };
         render: (opts: {
           canvas: HTMLCanvasElement;
@@ -96,6 +122,11 @@ export default function PdfWatermarkPreview({
       }
 
       const baseViewport = page.getViewport({ scale: 1 });
+      // Explicitly un-rotated (rotation: 0) viewport, independent of the
+      // page's own /Rotate. This mirrors pdf-lib's getWidth()/getHeight(),
+      // which is the coordinate space drawWatermarkOnPage()/
+      // drawPageNumberOnPage() in watermark.ts actually anchor text in.
+      const rawViewport = page.getViewport({ scale: 1, rotation: 0 });
       const scale = Math.min(
         1,
         maxDimension / Math.max(baseViewport.width, baseViewport.height),
@@ -127,6 +158,9 @@ export default function PdfWatermarkPreview({
       setImageDataUrl(dataUrl);
       setPageWidthPts(baseViewport.width);
       setPageHeightPts(baseViewport.height);
+      setRawPageWidthPts(rawViewport.width);
+      setRawPageHeightPts(rawViewport.height);
+      setPageRotation(baseViewport.rotation ?? 0);
 
       try {
         page.cleanup?.();
@@ -140,7 +174,13 @@ export default function PdfWatermarkPreview({
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       if (!controller.cancelled) setLoading(false);
-      currentRenderController.current = null;
+      // Only clear the ref if it still points at this render — a render we
+      // just cancelled (see the top of this function) has already been
+      // superseded, and nulling the ref here would wipe out the newer
+      // render's controller, breaking its own future cancellation.
+      if (currentRenderController.current === controller) {
+        currentRenderController.current = null;
+      }
     }
   }
 
@@ -153,6 +193,9 @@ export default function PdfWatermarkPreview({
       setImageDataUrl(null);
       setPageWidthPts(null);
       setPageHeightPts(null);
+      setRawPageWidthPts(null);
+      setRawPageHeightPts(null);
+      setPageRotation(0);
 
       try {
         // Dynamic import to get pdfjs-dist module
@@ -284,7 +327,14 @@ export default function PdfWatermarkPreview({
     margin = WATERMARK_MARGIN,
     opacity = 1,
   ): CSSProperties | undefined {
-    if (!imageDataUrl || !pageWidthPts || !pageHeightPts) return undefined;
+    if (
+      !imageDataUrl ||
+      !pageWidthPts ||
+      !pageHeightPts ||
+      !rawPageWidthPts ||
+      !rawPageHeightPts
+    )
+      return undefined;
     const measured = measuredSize;
     if (!measured) return undefined;
 
@@ -305,10 +355,17 @@ export default function PdfWatermarkPreview({
 
     const bbox = rotatedBoundingBox(textWidthPts, textHeightPts, rotationDeg);
 
+    // Anchor in the page's own un-rotated content space — the exact same
+    // space watermark.ts's drawWatermarkOnPage()/drawPageNumberOnPage()
+    // anchor in via pdf-lib's (un-rotated) getWidth()/getHeight(). Using
+    // the un-rotated dimensions here (rather than pageWidthPts/
+    // pageHeightPts, which reflect pdfjs-dist's *rotated* viewport) is
+    // what keeps this anchor numerically identical to the one pdf-lib
+    // will actually use.
     const anchor = anchorFor(
       position,
-      pageWidthPts,
-      pageHeightPts,
+      rawPageWidthPts,
+      rawPageHeightPts,
       bbox.width,
       bbox.height,
       margin,
@@ -317,14 +374,48 @@ export default function PdfWatermarkPreview({
     const xOriginPts = anchor.x - bbox.minX;
     const yOriginPts = anchor.y - bbox.minY;
 
-    const leftPct = (xOriginPts / pageWidthPts) * 100;
-    const bottomPct = (yOriginPts / pageHeightPts) * 100;
+    // Map that un-rotated content-space point into the *rotated* viewport
+    // space the rendered canvas actually uses, reproducing pdfjs-dist's
+    // PageViewport transform for the page's own /Rotate (0/90/180/270),
+    // for a viewBox with its origin at (0, 0) — the common case, matching
+    // the same assumption pdf-lib's getWidth()/getHeight() already makes.
+    let viewportX: number;
+    let viewportYFromTop: number;
+    switch (((pageRotation % 360) + 360) % 360) {
+      case 90:
+        viewportX = yOriginPts;
+        viewportYFromTop = xOriginPts;
+        break;
+      case 180:
+        viewportX = rawPageWidthPts - xOriginPts;
+        viewportYFromTop = yOriginPts;
+        break;
+      case 270:
+        viewportX = rawPageHeightPts - yOriginPts;
+        viewportYFromTop = rawPageWidthPts - xOriginPts;
+        break;
+      default:
+        viewportX = xOriginPts;
+        viewportYFromTop = rawPageHeightPts - yOriginPts;
+        break;
+    }
+
+    const leftPct = (viewportX / pageWidthPts) * 100;
+    const bottomPct = ((pageHeightPts - viewportYFromTop) / pageHeightPts) * 100;
+
+    // CSS rotate() is clockwise for a positive angle, but rotatedBoundingBox()
+    // (and pdf-lib's own `rotate: degrees(...)`) use the standard
+    // counterclockwise math convention — so the configured watermark
+    // rotation's sign must be flipped to display in the same direction it
+    // will actually be drawn in the PDF. The page's own /Rotate is already
+    // a clockwise value (per the PDF spec) and composes directly on top.
+    const cssRotationDeg = pageRotation - rotationDeg;
 
     const style: CSSProperties = {
       position: "absolute",
       left: `${leftPct}%`,
       bottom: `${bottomPct}%`,
-      transform: `rotate(${rotationDeg}deg)`,
+      transform: `rotate(${cssRotationDeg}deg)`,
       transformOrigin: "left bottom",
       fontSize: `${fontPx}px`,
       fontFamily: "Helvetica, Arial, sans-serif",
@@ -385,7 +476,7 @@ export default function PdfWatermarkPreview({
             type="button"
             onClick={gotoPrev}
             disabled={currentPage <= 1 || loading}
-            className="rounded-md border px-2 py-1 text-sm"
+            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
           >
             Previous
           </button>
@@ -393,7 +484,7 @@ export default function PdfWatermarkPreview({
             type="button"
             onClick={gotoNext}
             disabled={currentPage >= pageCount || loading}
-            className="rounded-md border px-2 py-1 text-sm"
+            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
           >
             Next
           </button>
@@ -405,14 +496,21 @@ export default function PdfWatermarkPreview({
 
       <div className="mt-3 rounded-lg border border-gray-200 bg-white p-4">
         {loading && (
-          <div className="flex h-64 items-center justify-center">
+          <div
+            className="flex h-64 items-center justify-center"
+            role="status"
+            aria-live="polite"
+          >
             <p className="text-sm text-gray-500">Rendering preview...</p>
           </div>
         )}
 
         {!loading && error && (
-          <div className="flex h-64 items-center justify-center px-6 text-center">
-            <p className="text-sm font-medium text-amber-600">{error}</p>
+          <div
+            className="flex h-64 items-center justify-center px-6 text-center"
+            role="alert"
+          >
+            <p className="text-sm font-medium text-red-600">{error}</p>
           </div>
         )}
 
@@ -455,14 +553,19 @@ export default function PdfWatermarkPreview({
                   </span>
                   {/* Real watermark text, at the actual configured opacity —
                       this is the truthful WYSIWYG preview of what gets
-                      drawn into the PDF. */}
-                  <span style={style}>{watermarkText}</span>
+                      drawn into the PDF. Decorative: hidden from screen
+                      readers so this positioned overlay text isn't
+                      announced as page content. */}
+                  <span style={style} aria-hidden="true">{watermarkText}</span>
                 </>
               );
             })()}
 
             {pageNumbersEnabled && pageNumberLabel && (
-              <span style={toOverlayStyle(pageNumberLabel, true)}>
+              <span
+                style={toOverlayStyle(pageNumberLabel, true)}
+                aria-hidden="true"
+              >
                 {pageNumberLabel}
               </span>
             )}
@@ -471,9 +574,25 @@ export default function PdfWatermarkPreview({
               <p className="mt-3 text-center text-xs text-gray-500 absolute left-0 right-0 bottom-2">Enable watermark or page numbers to preview changes.</p>
             )}
 
-            {/* Indicate when page numbers are not applied to this page */}
-            {pageNumbersEnabled && !pageNumberApplied && (
-              <div className="absolute left-2 top-2 rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">
+            {/* Indicate when page numbers are not applied to this page —
+                distinguishing an invalid page-selection input (nothing can
+                be previewed yet) from a valid selection that simply
+                excludes this particular page. */}
+            {pageNumbersEnabled &&
+              pageRangeMode === "selected" &&
+              pageSelectionError && (
+                <div
+                  className="absolute left-2 top-2 rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800"
+                  role="status"
+                >
+                  Fix the selected pages input to preview page numbers
+                </div>
+              )}
+            {pageNumbersEnabled && !pageSelectionError && !pageNumberApplied && (
+              <div
+                className="absolute left-2 top-2 rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800"
+                role="status"
+              >
                 Page numbers will NOT be applied to this page
               </div>
             )}
