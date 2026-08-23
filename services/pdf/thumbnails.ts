@@ -52,6 +52,14 @@ export async function renderPageThumbnails(
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
       options.onProgress?.({ currentPage: pageNumber, pageCount: pdf.numPages });
 
+      // Yield to the browser once per page so it can paint (progress UI,
+      // input, etc.) between page renders instead of blocking the main
+      // thread for the whole document — same approach used for the
+      // Compress PDF rasterization fix.
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+
       if (pageNumber > maxRenderedPages) {
         thumbnails.push({ pageNumber, dataUrl: null });
         continue;

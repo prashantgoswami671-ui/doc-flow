@@ -17,6 +17,14 @@ function isPdfFile(file: File): boolean {
   );
 }
 
+function getInsertedFilename(originalName: string): string {
+  if (originalName.toLowerCase().endsWith(".pdf")) {
+    return `${originalName.slice(0, -4)}-inserted.pdf`;
+  }
+
+  return `${originalName}-inserted.pdf`;
+}
+
 function downloadPdfBytes(bytes: Uint8Array, filename: string): void {
   const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
   const objectUrl = URL.createObjectURL(blob);
@@ -290,7 +298,7 @@ export default function InsertPagesCard() {
       );
 
       setResult(insertResult);
-      downloadPdfBytes(insertResult.bytes, "document-with-inserted-pages.pdf");
+      downloadPdfBytes(insertResult.bytes, getInsertedFilename(targetFile.name));
     } catch (insertError) {
       console.error("PDF insert error:", insertError);
       setError(
@@ -305,8 +313,8 @@ export default function InsertPagesCard() {
   };
 
   const handleDownloadResult = () => {
-    if (!result) return;
-    downloadPdfBytes(result.bytes, "document-with-inserted-pages.pdf");
+    if (!result || !targetFile) return;
+    downloadPdfBytes(result.bytes, getInsertedFilename(targetFile.name));
   };
 
   return (
