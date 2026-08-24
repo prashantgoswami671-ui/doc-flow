@@ -1,4 +1,5 @@
 import { degrees, PDFDocument } from "pdf-lib";
+import { getPageLevelWorkingDocument } from "./shared";
 
 export type RotationDegrees = 90 | 180 | 270;
 
@@ -84,7 +85,13 @@ export async function applyPageRotations(
   }
 
   const startTime = performance.now();
-  const pdfDocument = await loadRotateSourceOrThrow(file);
+  const sourcePdfDocument = await loadRotateSourceOrThrow(file);
+  // Normal, single-generation PDFs take the existing fast/direct path
+  // unchanged (`rebuilt: false`, same `pdfDocument` instance). Only PDFs
+  // with duplicate-generation objects (e.g. C2PA/Content-Credentials-style
+  // incremental updates) get rebuilt via copyPages() into a fresh document
+  // first -- see services/pdf/shared.ts for why.
+  const { pdfDocument } = await getPageLevelWorkingDocument(sourcePdfDocument);
   const pages = pdfDocument.getPages();
   const correctedPages = new Set<number>();
 
@@ -134,7 +141,13 @@ export async function rotatePDF(
   }
 
   const startTime = performance.now();
-  const pdfDocument = await loadRotateSourceOrThrow(file);
+  const sourcePdfDocument = await loadRotateSourceOrThrow(file);
+  // Normal, single-generation PDFs take the existing fast/direct path
+  // unchanged (`rebuilt: false`, same `pdfDocument` instance). Only PDFs
+  // with duplicate-generation objects (e.g. C2PA/Content-Credentials-style
+  // incremental updates) get rebuilt via copyPages() into a fresh document
+  // first -- see services/pdf/shared.ts for why.
+  const { pdfDocument } = await getPageLevelWorkingDocument(sourcePdfDocument);
   const pages = pdfDocument.getPages();
 
   for (const page of pages) {
