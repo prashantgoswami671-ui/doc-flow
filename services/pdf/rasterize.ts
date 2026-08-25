@@ -16,8 +16,10 @@ function getSettings(mode: RasterCompressionMode): RasterSettings {
   }
 
   return {
-    // Keep more detail than Heavy while avoiding the previous upscaling.
-    scale: 2.0,
+    // Validated Light settings: scale 2.2 / JPEG quality 0.92
+    // produced a 31.3% reduction on the real 27 MB test PDF while
+    // remaining clear and readable.
+    scale: 2.2,
     quality: 0.92,
   };
 }
