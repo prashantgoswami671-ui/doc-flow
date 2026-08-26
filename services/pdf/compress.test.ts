@@ -374,6 +374,42 @@ describe("compressPDF — custom compression: target below original size", () =>
   });
 });
 
+describe("compressPDF — custom compression: range regression (unchanged by Light-settings change)", () => {
+  it("still measures level 1 as scale 2.0/quality 0.92 and level 0 as scale 0.75/quality 0.45", async () => {
+    // Phase 3.2 changed Light's fixed rasterize settings only
+    // (services/pdf/rasterize.ts). This test exists to prove Custom's own
+    // CUSTOM_MIN_SCALE/CUSTOM_MAX_SCALE/CUSTOM_MIN_QUALITY/CUSTOM_MAX_QUALITY
+    // constants in compress.ts were not touched, by observing the actual
+    // settings compressToCustomTarget() passes to the rasterizer at its two
+    // fixed probe levels (1 = highest quality, 0 = lowest/most compressed),
+    // rather than assuming the constants from an earlier investigation still
+    // hold.
+    const sourceBytes = await buildImageHeavyPdfBytes(1);
+    const file = toFile(sourceBytes);
+
+    // Deliberately unreachable target: every mocked candidate below stays
+    // above it, so compressToCustomTarget must measure both the level-1 and
+    // level-0 endpoints (and never reach/short-circuit into the binary
+    // search, which would otherwise also call rasterizePDFWithSettings with
+    // intermediate, non-endpoint levels).
+    const unreachableTargetMb =
+      Math.floor(sourceBytes.length * 0.01) / (1024 * 1024);
+
+    mockRasterizePDFWithSettings.mockResolvedValue(
+      new Uint8Array(Math.floor(sourceBytes.length * 0.5)),
+    );
+
+    await compressPDF(file, "custom", unreachableTargetMb);
+
+    const calls = mockRasterizePDFWithSettings.mock.calls;
+    const highestQualityCall = calls.find(([, settings]) => settings.scale === 2.0);
+    const lowestQualityCall = calls.find(([, settings]) => settings.scale === 0.75);
+
+    expect(highestQualityCall?.[1]).toEqual({ scale: 2.0, quality: 0.92 });
+    expect(lowestQualityCall?.[1]).toEqual({ scale: 0.75, quality: 0.45 });
+  });
+});
+
 describe("compressPDF — custom compression: invalid targets", () => {
   it.each([
     ["undefined", undefined],

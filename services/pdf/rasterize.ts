@@ -7,7 +7,10 @@ export interface RasterSettings {
   quality: number;
 }
 
-function getSettings(mode: RasterCompressionMode): RasterSettings {
+// Exported (not just used internally) so compress.test.ts / rasterize.test.ts
+// can assert on the concrete Light/Heavy numbers directly, instead of only
+// observing them indirectly through mocked rasterizePDF() call args.
+export function getSettings(mode: RasterCompressionMode): RasterSettings {
   if (mode === "heavy") {
     return {
       scale: 1.0,
@@ -15,10 +18,18 @@ function getSettings(mode: RasterCompressionMode): RasterSettings {
     };
   }
 
+  // Validated Light settings:
+  // scale 2.2 + JPEG quality 0.92 produced a 31.3% reduction
+  // on the real ~27 MB test PDF while remaining clear and readable.
+  // Scale controls rasterization resolution only; pageViewport below
+  // keeps the output PDF's physical page dimensions unchanged
   return {
+
     // Validated Light settings: scale 2.2 / JPEG quality 0.92
     // produced a 31.3% reduction on the real 27 MB test PDF while
     // remaining clear and readable.
+
+
     scale: 2.2,
     quality: 0.92,
   };
@@ -73,14 +84,25 @@ export async function rasterizePDFWithSettings(
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
       const page = await pdf.getPage(pageNumber);
 
-      const viewport = page.getViewport({
-        scale: settings.scale,
-      });
+      // `settings.scale` controls render *resolution* (pixel density) only.
+      // It must never determine the output PDF's physical page size — a
+      // page.getViewport({ scale }) viewport scales linearly with `scale`,
+      // so reusing it for `outputPdf.addPage()` would make Light (scale
+      // 2.0) render every page at 2x the original width/height (4x the
+      // area) and Custom pages vary in physical size (0.75x-2x) depending
+      // on which quality level the binary search lands on. `pageViewport`
+      // (scale: 1) is the physical page size — same bounding box pdf-lib
+      // reports for the original page, rotation included, since PDF.js
+      // applies the page's own /Rotate by default for both viewports.
+      // `renderViewport` is only used to size the canvas/JPEG so quality
+      // settings still control detail, independent of page geometry.
+      const pageViewport = page.getViewport({ scale: 1 });
+      const renderViewport = page.getViewport({ scale: settings.scale });
 
       const canvas = document.createElement("canvas");
 
-      canvas.width = Math.max(1, Math.ceil(viewport.width));
-      canvas.height = Math.max(1, Math.ceil(viewport.height));
+      canvas.width = Math.max(1, Math.ceil(renderViewport.width));
+      canvas.height = Math.max(1, Math.ceil(renderViewport.height));
 
       const context = canvas.getContext("2d");
 
@@ -92,7 +114,7 @@ export async function rasterizePDFWithSettings(
         await page.render({
           canvas,
           canvasContext: context,
-          viewport,
+          viewport: renderViewport,
         }).promise;
 
         let jpegBytes: Uint8Array;
@@ -118,19 +140,18 @@ export async function rasterizePDFWithSettings(
 
           jpegBytes = new Uint8Array(await jpegResponse.arrayBuffer());
         }
-
         const image = await outputPdf.embedJpg(jpegBytes);
 
         const outputPage = outputPdf.addPage([
-          viewport.width,
-          viewport.height,
+          pageViewport.width,
+          pageViewport.height,
         ]);
 
         outputPage.drawImage(image, {
           x: 0,
           y: 0,
-          width: viewport.width,
-          height: viewport.height,
+          width: pageViewport.width,
+          height: pageViewport.height,
         });
       } finally {
         if (releaseResources) {
