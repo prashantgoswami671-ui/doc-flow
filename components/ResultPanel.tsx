@@ -54,6 +54,9 @@ export default function ResultPanel({
 }: ResultPanelProps) {
   return (
     <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
       className={`border-t border-gray-100 bg-gray-50 px-4 sm:px-6 py-6 ${className ?? ""}`}
     >
       <div className="mb-4 flex items-center gap-3">

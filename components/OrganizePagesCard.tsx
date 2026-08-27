@@ -28,6 +28,7 @@ import {
   type CropEditorPreview,
   type SinglePagePreview,
 } from "../services/pdf/thumbnails";
+import ResultPanel from "./ResultPanel";
 import UploadZone from "./UploadZone";
 
 const rotationOptions: { rotation: PageRotation; label: string }[] = [
@@ -913,12 +914,19 @@ export default function OrganizePagesCard() {
           )}
 
           {isLoadingPreviews && (
-            <p className="mt-4 text-sm font-medium text-gray-500">
+            <p
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="mt-4 text-sm font-medium text-gray-500"
+            >
               {previewProgress}
             </p>
           )}
           {error && (
-            <p className="mt-4 text-sm font-medium text-red-600">{error}</p>
+            <p role="alert" className="mt-4 text-sm font-medium text-red-600">
+              {error}
+            </p>
           )}
           {pages.length > 0 && (
             <>
@@ -1254,12 +1262,20 @@ export default function OrganizePagesCard() {
                 </div>
 
                 {isLoadingEditor && (
-                  <p className="mt-3 text-sm font-medium text-gray-500">
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                    className="mt-3 text-sm font-medium text-gray-500"
+                  >
                     Loading page editor...
                   </p>
                 )}
                 {editorError && (
-                  <p className="mt-3 text-sm font-medium text-red-600">
+                  <p
+                    role="alert"
+                    className="mt-3 text-sm font-medium text-red-600"
+                  >
                     {editorError}
                   </p>
                 )}
@@ -1409,7 +1425,12 @@ export default function OrganizePagesCard() {
                     </div>
 
                     {editorNotice && (
-                      <p className="mt-2 text-sm font-medium text-gray-600">
+                      <p
+                        role="status"
+                        aria-live="polite"
+                        aria-atomic="true"
+                        className="mt-2 text-sm font-medium text-gray-600"
+                      >
                         {editorNotice}
                       </p>
                     )}
@@ -1469,87 +1490,41 @@ export default function OrganizePagesCard() {
               : "Apply All Changes & Download PDF"}
           </button>
 
-          {result && (
-            <div className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4">
-              <div className="flex items-center gap-3">
-                <span
-                  aria-hidden="true"
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-100 text-base font-semibold text-green-700"
-                >
-                  ✓
-                </span>
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">
-                    Changes applied
-                  </p>
-                  <p className="text-xs text-gray-600">
-                    {successMessage ??
-                      "Your PDF has been updated and downloaded."}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-3">
-                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-                  <p className="text-xs text-gray-500">Original pages</p>
-                  <p className="mt-0.5 text-sm font-semibold text-gray-800">
-                    {result.originalPageCount}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-                  <p className="text-xs text-gray-500">Deleted</p>
-                  <p className="mt-0.5 text-sm font-semibold text-gray-800">
-                    {result.deletedPageCount}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-                  <p className="text-xs text-gray-500">Rotated</p>
-                  <p className="mt-0.5 text-sm font-semibold text-gray-800">
-                    {result.rotatedPageCount}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-                  <p className="text-xs text-gray-500">Cropped</p>
-                  <p className="mt-0.5 text-sm font-semibold text-gray-800">
-                    {result.croppedPageCount}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-                  <p className="text-xs text-gray-500">Remaining</p>
-                  <p className="mt-0.5 text-sm font-semibold text-gray-800">
-                    {result.remainingPageCount}
-                  </p>
-                </div>
-              </div>
-
-              <p className="mt-2 text-sm text-gray-600">
-                {result.reordered ? "Pages reordered · " : ""}Completed in{" "}
-                {(result.processingTime / 1000).toFixed(2)}s.
-              </p>
-
-              <button
-                type="button"
-                onClick={() =>
-                  downloadPdfBytes(
-                    result.bytes,
-                    getOrganizedFilename(selectedFile?.name ?? "Unknown.pdf"),
-                  )
-                }
-                className="mt-3 w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
-              >
-                Download PDF Again
-              </button>
-
-              <button
-                type="button"
-                onClick={resetState}
-                className="mt-3 w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
-              >
-                Organize another PDF
-              </button>
-            </div>
+          {isProcessing && (
+            <p
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="mt-2 text-center text-xs text-gray-500"
+            >
+              Applying all changes — this may take a moment.
+            </p>
           )}
         </div>
+
+        {result && (
+          <ResultPanel
+            icon="✓"
+            title="Changes applied"
+            message={`${successMessage ?? "Your PDF has been updated and downloaded."} · ${(result.processingTime / 1000).toFixed(2)}s${result.reordered ? " · Pages reordered" : ""}`}
+            stats={[
+              { label: "Original pages", value: result.originalPageCount },
+              { label: "Deleted", value: result.deletedPageCount },
+              { label: "Rotated", value: result.rotatedPageCount },
+              { label: "Cropped", value: result.croppedPageCount },
+              { label: "Remaining", value: result.remainingPageCount },
+            ]}
+            onDownload={() =>
+              downloadPdfBytes(
+                result.bytes,
+                getOrganizedFilename(selectedFile?.name ?? "Unknown.pdf"),
+              )
+            }
+            downloadLabel="Download PDF Again"
+            onReset={resetState}
+            resetLabel="Organize another PDF"
+          />
+        )}
       </div>
 
       {/* LARGE READABLE PAGE PREVIEW MODAL */}
@@ -1663,7 +1638,10 @@ export default function OrganizePagesCard() {
               )}
 
               {previewImageError && (
-                <div className="py-12 text-center text-red-600 text-sm font-medium">
+                <div
+                  role="alert"
+                  className="py-12 text-center text-red-600 text-sm font-medium"
+                >
                   {previewImageError}
                 </div>
               )}

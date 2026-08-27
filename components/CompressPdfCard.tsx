@@ -289,7 +289,12 @@ export default function CompressPdfCard() {
             )}
 
             {successMessage && (
-              <p className="text-sm text-green-600 font-medium">
+              <p
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                className="text-sm text-green-600 font-medium"
+              >
                 {successMessage}
               </p>
             )}
@@ -306,13 +311,23 @@ export default function CompressPdfCard() {
             )}
 
             {selectedFile && isAnalyzing && (
-              <p className="mt-3 text-sm font-medium text-gray-500">
+              <p
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                className="mt-3 text-sm font-medium text-gray-500"
+              >
                 Analyzing PDF...
               </p>
             )}
 
             {selectedFile && analysisError && (
-              <p className="mt-3 text-sm font-medium text-amber-600">
+              <p
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                className="mt-3 text-sm font-medium text-amber-600"
+              >
                 {analysisError}
               </p>
             )}
