@@ -271,6 +271,27 @@ export async function buildHighResScanPdfBytes(): Promise<Uint8Array> {
   return pdf.save();
 }
 
+/**
+ * 11. Extreme-aspect-ratio page: a very wide, very short single page.
+ * Phase 3.5 fixture — lets the canvas-size guard (computeSafeRenderScale)
+ * be exercised through the real rasterizer (Playwright) cheaply: the
+ * width alone (50000pt) already forces the guard to engage at Light's
+ * scale 2.2 (a naive 110000px-wide canvas), but because the page is only
+ * 50pt tall, the *clamped* render is a tiny image (a few hundred pixels
+ * on its long side), so the real render/JPEG-encode stays fast instead of
+ * requiring an actual multi-thousand-pixel-square canvas to prove the
+ * guard prevents an oversized allocation.
+ */
+export async function buildExtremeAspectRatioPdfBytes(): Promise<Uint8Array> {
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const page = pdf.addPage([50000, 50]);
+
+  page.drawText("Extreme aspect ratio fixture", { x: 10, y: 15, size: 10, font });
+
+  return pdf.save();
+}
+
 /** Wraps fixture bytes as a File, the way the browser upload path does. */
 export function toFile(bytes: Uint8Array, name = "fixture.pdf"): File {
   return new File([bytes as BlobPart], name, { type: "application/pdf" });

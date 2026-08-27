@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { compressPDF } from "@/services/pdf/compress";
 import { rasterizePDF } from "@/services/pdf/rasterize";
 import {
+  buildExtremeAspectRatioPdfBytes,
   buildImageHeavyPdfBytes,
   buildMixedOrientationPdfBytes,
   buildScannedImageOnlyPdfBytes,
@@ -314,6 +315,40 @@ export default function CompressionTestPage() {
     };
   }
 
+  // ---------------------------------------------------------------------
+  // TEST H — Phase 3.5: extreme-page-size canvas guard doesn't crash and
+  // still preserves physical dimensions
+  // ---------------------------------------------------------------------
+  async function runTestH(): Promise<TestResult> {
+    const sourceBytes = await buildExtremeAspectRatioPdfBytes(); // 50000x50pt
+    const file = toFile(sourceBytes, "extreme-aspect-ratio-fixture.pdf");
+
+    const sourcePdf = await PDFDocument.load(sourceBytes);
+    const sourceDims = sourcePdf.getPages().map((p) => p.getSize());
+
+    // Direct rasterizer call (see file header) — before the Phase 3.5
+    // canvas-size guard, this page's width alone at Light's scale 2.2
+    // would request a ~110000px-wide canvas. If that throws or hangs,
+    // this test's "success" never becomes true and the harness reports it
+    // via the error/uncaught-rejection listeners above.
+    const outputBytes = await rasterizePDF(file, "light");
+    const outputPdf = await PDFDocument.load(outputBytes); // throws if malformed
+    const outputDims = outputPdf.getPages().map((p) => p.getSize());
+
+    const dimensionsPreserved = sourceDims.every((d, i) => {
+      const out = outputDims[i];
+      return Math.abs(d.width - out.width) < 1 && Math.abs(d.height - out.height) < 1;
+    });
+
+    return {
+      success: true,
+      notEmpty: outputBytes.length > 0,
+      loadableByPdfLib: true,
+      pageCountPreserved: outputPdf.getPageCount() === sourcePdf.getPageCount(),
+      dimensionsPreserved,
+    };
+  }
+
   // Formats any thrown value (Error or not) into a message+stack string so
   // Playwright can see the *actual* failure instead of just a timeout.
   function describeError(err: unknown): string {
@@ -382,6 +417,9 @@ export default function CompressionTestPage() {
           case "test-g-custom":
             result = await runTestG();
             break;
+          case "test-h-extreme-page-size":
+            result = await runTestH();
+            break;
           default:
             throw new Error(`Unknown test: ${testName}`);
         }
@@ -431,6 +469,9 @@ export default function CompressionTestPage() {
         </button>
         <button data-testid="run-test-g" onClick={() => window.runCompressionTest?.("test-g-custom")}>
           Test G: Custom
+        </button>
+        <button data-testid="run-test-h" onClick={() => window.runCompressionTest?.("test-h-extreme-page-size")}>
+          Test H: Extreme Page Size
         </button>
       </div>
     </div>

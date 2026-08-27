@@ -132,4 +132,26 @@ test.describe("Phase 3.3 — real rasterizer integration tests", () => {
     // (see the audit's monotonicity-assumption risk). targetReached is
     // still recorded in the JSON for inspection.
   });
+
+  /*
+   * TEST H (Phase 3.5 — canvas-size guard):
+   * PHASE_3_3_INSPECTION_REPORT.md's Risk 3 flagged that nothing guarded
+   * against a page whose rendered pixel dimensions (physical size x
+   * settings.scale) would exceed what a browser canvas can reliably
+   * allocate. This fixture's 50000pt width alone would request a
+   * ~110000px-wide canvas at Light's scale 2.2 before the Phase 3.5 fix
+   * (computeSafeRenderScale in rasterize.ts). This test proves the real
+   * rasterizer completes without crashing/hanging and still preserves
+   * page count and physical page dimensions — only the render resolution
+   * is reduced for a page this extreme, never the output page geometry.
+   */
+  test("TEST H — extreme page size does not crash the real rasterizer and preserves dimensions", async ({ page }) => {
+    const r = await runAndGetResult(page, "run-test-h");
+
+    expect(r.success).toBe(true);
+    expect(r.notEmpty).toBe(true);
+    expect(r.loadableByPdfLib).toBe(true);
+    expect(r.pageCountPreserved).toBe(true);
+    expect(r.dimensionsPreserved).toBe(true);
+  });
 });

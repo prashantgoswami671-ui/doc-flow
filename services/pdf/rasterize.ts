@@ -44,6 +44,59 @@ export function normalizeRotationDegrees(rotate: number): number {
   return ((rotate % 360) + 360) % 360;
 }
 
+// Phase 3.5 — Rasterizer robustness / edge-case hardening.
+//
+// PHASE_3_3_INSPECTION_REPORT.md (Risk 3, "Canvas Memory/Size Limits")
+// flagged that nothing here guards against very large pages producing a
+// canvas the browser can't/shouldn't allocate: canvas.width/height were
+// set directly from renderViewport with no upper bound, so a large
+// physical page (e.g. a poster-sized custom page size) combined with
+// Light's scale 2.2 or Custom's max scale 2.0 could request a canvas
+// beyond what browsers reliably support, risking a crash, a silently
+// zero-sized canvas, or excessive memory use.
+//
+// 16384px is used as the safe per-dimension ceiling because it's the
+// figure the project's own inspection report cites as the typical Chrome
+// canvas dimension limit (memory limits aside), and it comfortably clears
+// every existing fixture (e.g. the 2000x3000pt "large" unusual-page-size
+// fixture at Light's scale 2.2 is 4400x6600 — well under this ceiling —
+// and the 2480x3508 high-res-scan fixture at 2.2 is 5456x7718), so normal
+// and already-tested pages render at their existing resolution, unchanged.
+export const MAX_CANVAS_DIMENSION = 16384;
+
+/**
+ * Given a page's intrinsic (scale=1) width/height and the requested raster
+ * `scale`, returns the scale that should actually be used to render the
+ * page: `scale` unchanged if the resulting canvas would fit within
+ * `maxDimension` on its longest side, otherwise `scale` reduced by
+ * whatever factor brings the longest side down to `maxDimension` (aspect
+ * ratio preserved).
+ *
+ * This only ever affects raster *resolution* — it must never be used to
+ * compute the output PDF's physical page size (that remains
+ * `pageViewport` at the unclamped scale=1, exactly as before), so page
+ * count, physical dimensions, and rotation semantics are all unaffected;
+ * only the sharpness of the embedded JPEG is reduced, and only for pages
+ * large enough that the unclamped render would otherwise risk failing to
+ * allocate a canvas at all.
+ */
+export function computeSafeRenderScale(
+  pageWidth: number,
+  pageHeight: number,
+  scale: number,
+  maxDimension: number = MAX_CANVAS_DIMENSION,
+): number {
+  const requestedWidth = pageWidth * scale;
+  const requestedHeight = pageHeight * scale;
+  const longestSide = Math.max(requestedWidth, requestedHeight);
+
+  if (!Number.isFinite(longestSide) || longestSide <= maxDimension) {
+    return scale;
+  }
+
+  return scale * (maxDimension / longestSide);
+}
+
 /**
  * Converts a PDF into a new PDF made from compressed JPEG page images.
  *
@@ -117,8 +170,19 @@ export async function rasterizePDFWithSettings(
       // the pixels here (the previous behavior) and then also writing
       // /Rotate metadata would rotate the page twice.
       const pageViewport = page.getViewport({ scale: 1, rotation: 0 });
+
+      // Phase 3.5: clamp only the *render* scale, never pageViewport
+      // above (physical output size) — see computeSafeRenderScale's doc
+      // comment. Unaffected for every page/mode already covered by
+      // existing tests; only engages for pages large enough that the
+      // unclamped canvas would risk exceeding what browsers support.
+      const safeScale = computeSafeRenderScale(
+        pageViewport.width,
+        pageViewport.height,
+        settings.scale,
+      );
       const renderViewport = page.getViewport({
-        scale: settings.scale,
+        scale: safeScale,
         rotation: 0,
       });
 
