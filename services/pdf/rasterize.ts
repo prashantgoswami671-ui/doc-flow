@@ -1,4 +1,4 @@
-import { PDFDocument } from "pdf-lib";
+import { degrees, PDFDocument } from "pdf-lib";
 
 export type RasterCompressionMode = "light" | "heavy";
 
@@ -33,6 +33,15 @@ export function getSettings(mode: RasterCompressionMode): RasterSettings {
     scale: 2.2,
     quality: 0.92,
   };
+}
+
+/**
+ * Normalizes a PDF.js page's `/Rotate`-derived `rotate` value (which can be
+ * negative or >= 360, e.g. from malformed source PDFs) into the 0-359
+ * range, in a multiple of 90.
+ */
+export function normalizeRotationDegrees(rotate: number): number {
+  return ((rotate % 360) + 360) % 360;
 }
 
 /**
@@ -84,6 +93,11 @@ export async function rasterizePDFWithSettings(
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
       const page = await pdf.getPage(pageNumber);
 
+      // The source page's /Rotate value, normalized to one of 0/90/180/270.
+      // Captured here so it can be written back out as output PDF rotation
+      // metadata below, instead of only being baked into pixels.
+      const sourceRotation = normalizeRotationDegrees(page.rotate);
+
       // `settings.scale` controls render *resolution* (pixel density) only.
       // It must never determine the output PDF's physical page size — a
       // page.getViewport({ scale }) viewport scales linearly with `scale`,
@@ -91,13 +105,22 @@ export async function rasterizePDFWithSettings(
       // 2.0) render every page at 2x the original width/height (4x the
       // area) and Custom pages vary in physical size (0.75x-2x) depending
       // on which quality level the binary search lands on. `pageViewport`
-      // (scale: 1) is the physical page size — same bounding box pdf-lib
-      // reports for the original page, rotation included, since PDF.js
-      // applies the page's own /Rotate by default for both viewports.
-      // `renderViewport` is only used to size the canvas/JPEG so quality
-      // settings still control detail, independent of page geometry.
-      const pageViewport = page.getViewport({ scale: 1 });
-      const renderViewport = page.getViewport({ scale: settings.scale });
+      // (scale: 1, rotation: 0) is the page's *intrinsic* (pre-rotation)
+      // physical size — the same bounding box pdf-lib reports for the
+      // original page before /Rotate is applied. `renderViewport` is only
+      // used to size the canvas/JPEG so quality settings still control
+      // detail, independent of page geometry. Both viewports pin
+      // `rotation: 0` (rather than letting PDF.js apply the page's own
+      // /Rotate as it does by default) so the raster is produced in the
+      // page's un-rotated orientation; `outputPage.setRotation()` below
+      // reapplies `sourceRotation` for display. Baking the rotation into
+      // the pixels here (the previous behavior) and then also writing
+      // /Rotate metadata would rotate the page twice.
+      const pageViewport = page.getViewport({ scale: 1, rotation: 0 });
+      const renderViewport = page.getViewport({
+        scale: settings.scale,
+        rotation: 0,
+      });
 
       const canvas = document.createElement("canvas");
 
@@ -146,6 +169,8 @@ export async function rasterizePDFWithSettings(
           pageViewport.width,
           pageViewport.height,
         ]);
+
+        outputPage.setRotation(degrees(sourceRotation));
 
         outputPage.drawImage(image, {
           x: 0,

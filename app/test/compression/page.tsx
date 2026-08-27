@@ -171,29 +171,32 @@ export default function CompressionTestPage() {
     const outputBytes = await rasterizePDF(file, "light");
     const outputPdf = await PDFDocument.load(outputBytes);
     const outputPages = outputPdf.getPages();
-    const outputInfo = outputPages.map((p) => ({
-      rotation: p.getRotation().angle,
-      mediaBox: p.getSize(),
-    }));
+    const outputInfo = outputPages.map((p) => {
+      const rotation = p.getRotation().angle;
+      const mediaBox = p.getSize(); // raw, UNROTATED media-box dims
+      const swapped = rotation === 90 || rotation === 270;
+      const visualBoundingBox = swapped
+        ? { width: mediaBox.height, height: mediaBox.width }
+        : { width: mediaBox.width, height: mediaBox.height };
+      return { rotation, mediaBox, visualBoundingBox };
+    });
 
-    // EXPECTED (per Phase 3.3 audit) to come back FALSE: rasterize.ts's
-    // outputPdf.addPage() call is never followed by
-    // outputPage.setRotation(...), so every output page's /Rotate is 0
-    // regardless of the source page's rotation. That is a pre-existing
-    // baseline defect in the production rasterizer, NOT a bug in this
-    // test — do not "fix" this assertion to make it pass.
+    // Phase 3.4: rasterize.ts now calls outputPage.setRotation(...) with
+    // the source page's own /Rotate value, so this comes back TRUE. See
+    // rasterize.ts for the production fix.
     const rotationMetadataPreserved = sourceInfo.every(
       (s, i) => s.rotation === outputInfo[i].rotation,
     );
 
-    // This compares against the rotation-aware VISUAL bounding box (width/
-    // height swapped for 90/270), never the raw unrotated media-box —
-    // mixing the two up would produce a meaningless assertion in either
-    // direction. This one IS expected to pass, because
-    // pageViewport = page.getViewport({ scale: 1 }) already reflects
-    // PDF.js's own rotation-aware viewport.
+    // Compares rotation-aware VISUAL bounding boxes on both sides (width/
+    // height swapped for 90/270), never the raw media-box — mixing the two
+    // up would produce a meaningless assertion in either direction. Since
+    // Phase 3.4, the output page's own box is intentionally the
+    // *unrotated* intrinsic size (see rasterize.ts), with /Rotate applied
+    // separately, so outputInfo's visual box is derived the same way as
+    // sourceInfo's rather than read directly off getSize().
     const visualDimensionsPreserved = sourceInfo.every((s, i) => {
-      const out = outputInfo[i].mediaBox;
+      const out = outputInfo[i].visualBoundingBox;
       const widthMatch = Math.abs(s.visualBoundingBox.width - out.width) < 1;
       const heightMatch = Math.abs(s.visualBoundingBox.height - out.height) < 1;
       return widthMatch && heightMatch;

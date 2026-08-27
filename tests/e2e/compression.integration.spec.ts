@@ -10,15 +10,15 @@ import { test, expect } from "@playwright/test";
  *
  * This file intentionally does NOT modify rasterize.ts or compress.ts.
  *
- * KNOWN EXPECTED FAILURE — TEST C (rotation):
+ * TEST C (rotation):
  * The Phase 3.3 audit identified that rasterize.ts's outputPdf.addPage()
- * call is never followed by outputPage.setRotation(...), so every output
- * page's /Rotate metadata comes back 0 regardless of the source page's
+ * call was never followed by outputPage.setRotation(...), so every output
+ * page's /Rotate metadata came back 0 regardless of the source page's
  * rotation. TEST C asserts the ideal invariant (rotation metadata should
- * be preserved) and is EXPECTED TO FAIL against the current production
- * rasterizer. That failure is the Phase 3.3 baseline finding this test
- * exists to capture — it must not be "fixed" by weakening the assertion
- * or by changing rasterize.ts.
+ * be preserved), which was EXPECTED TO FAIL against the Phase 3.3
+ * baseline rasterizer. Phase 3.4 fixed the production rasterizer to
+ * satisfy this invariant (see services/pdf/rasterize.ts), so this test
+ * now genuinely passes rather than being marked as an expected failure.
  */
 
 test.describe("Phase 3.3 — real rasterizer integration tests", () => {
@@ -72,19 +72,18 @@ test.describe("Phase 3.3 — real rasterizer integration tests", () => {
     expect(r.dimensionsPreserved).toBe(true);
   });
 
-  test("TEST C — rotation baseline: metadata is NOT preserved (expected pre-existing defect); visual bounding box IS", async ({ page }) => {
+  test("TEST C — rotation: /Rotate metadata and visual bounding box are both preserved", async ({ page }) => {
     const r = await runAndGetResult(page, "run-test-c");
-    test.fail(true, "Known Phase 3.3 baseline: rasterizer currently loses /Rotate metadata");
     expect(r.success).toBe(true);
     expect(r.pageCount).toBe(5);
 
-    // Expected to PASS: PDF.js's scale-1 viewport already reflects
-    // /Rotate, so the output page's physical (visual) bounding box
-    // matches the source's rotated bounding box.
+    // PDF.js's rotation-aware viewport already reflected /Rotate, so the
+    // output page's physical (visual) bounding box matches the source's
+    // rotated bounding box.
     expect(r.visualDimensionsPreserved).toBe(true);
 
-    // Expected to FAIL against the current production rasterizer — see
-    // file header. Left as the "correct" invariant on purpose.
+    // Phase 3.4: the production rasterizer now writes the source page's
+    // /Rotate value onto the output page via outputPage.setRotation().
     expect(r.rotationMetadataPreserved).toBe(true);
   });
 
