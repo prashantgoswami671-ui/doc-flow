@@ -154,4 +154,26 @@ test.describe("Phase 3.3 — real rasterizer integration tests", () => {
     expect(r.pageCountPreserved).toBe(true);
     expect(r.dimensionsPreserved).toBe(true);
   });
+
+  /*
+   * TEST I (Phase 3.6 — non-finite canvas dimension guard):
+   * A non-finite `settings.scale` passed to rasterizePDFWithSettings()
+   * (e.g. from a bad upstream computation) previously sailed through
+   * computeSafeRenderScale unchanged and then through the old
+   * `Math.max(1, Math.ceil(renderViewport.width))` canvas-size
+   * expression, which also propagates NaN — and assigning a non-finite
+   * value to canvas.width/height is silently coerced to 0 per the canvas
+   * spec. This test proves the real rasterizer completes without
+   * crashing/hanging against a NaN scale and still produces a valid,
+   * correctly-paged, correctly-sized output PDF.
+   */
+  test("TEST I — non-finite render scale does not crash the real rasterizer and preserves dimensions", async ({ page }) => {
+    const r = await runAndGetResult(page, "run-test-i");
+
+    expect(r.success).toBe(true);
+    expect(r.notEmpty).toBe(true);
+    expect(r.loadableByPdfLib).toBe(true);
+    expect(r.pageCountPreserved).toBe(true);
+    expect(r.dimensionsPreserved).toBe(true);
+  });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  computeSafeCanvasDimension,
   computeSafeRenderScale,
   getSettings,
   MAX_CANVAS_DIMENSION,
@@ -135,5 +136,49 @@ describe("computeSafeRenderScale", () => {
 
   it("respects a custom maxDimension override", () => {
     expect(computeSafeRenderScale(1000, 1000, 1, 500)).toBeCloseTo(0.5, 6);
+  });
+});
+
+/*
+ * Phase 3.6 — Rasterizer robustness / edge-case hardening.
+ *
+ * computeSafeCanvasDimension() is the pure piece of the Phase 3.6 fix: it
+ * guards the canvas.width/height assignment against a non-finite
+ * renderViewport dimension (which the old `Math.max(1, Math.ceil(value))`
+ * expression let through as NaN, silently coerced to 0 by the canvas
+ * spec) while returning exactly what that old expression already
+ * returned for every finite value, so no currently-tested page's
+ * rendered resolution changes.
+ */
+describe("computeSafeCanvasDimension", () => {
+  it("matches the old Math.max(1, Math.ceil(value)) behavior for normal finite values", () => {
+    expect(computeSafeCanvasDimension(612)).toBe(612);
+    expect(computeSafeCanvasDimension(791.4)).toBe(792);
+    expect(computeSafeCanvasDimension(0.2)).toBe(1);
+  });
+
+  it("floors non-positive finite values at 1, same as the old expression", () => {
+    expect(computeSafeCanvasDimension(0)).toBe(1);
+    expect(computeSafeCanvasDimension(-50)).toBe(1);
+  });
+
+  it("returns 1 for NaN instead of propagating it (the Phase 3.6 gap)", () => {
+    expect(computeSafeCanvasDimension(NaN)).toBe(1);
+  });
+
+  it("returns 1 for +Infinity and -Infinity instead of propagating them", () => {
+    expect(computeSafeCanvasDimension(Infinity)).toBe(1);
+    expect(computeSafeCanvasDimension(-Infinity)).toBe(1);
+  });
+
+  it("never returns a non-finite or non-positive value for any input", () => {
+    const inputs = [NaN, Infinity, -Infinity, 0, -1, 0.4, 4400, 5456];
+
+    for (const input of inputs) {
+      const result = computeSafeCanvasDimension(input);
+      expect(Number.isFinite(result)).toBe(true);
+      expect(result).toBeGreaterThanOrEqual(1);
+      expect(Number.isInteger(result)).toBe(true);
+    }
   });
 });

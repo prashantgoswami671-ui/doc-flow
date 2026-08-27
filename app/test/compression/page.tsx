@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { compressPDF } from "@/services/pdf/compress";
-import { rasterizePDF } from "@/services/pdf/rasterize";
+import { rasterizePDF, rasterizePDFWithSettings } from "@/services/pdf/rasterize";
 import {
   buildExtremeAspectRatioPdfBytes,
   buildImageHeavyPdfBytes,
@@ -349,6 +349,48 @@ export default function CompressionTestPage() {
     };
   }
 
+  // ---------------------------------------------------------------------
+  // TEST I — Phase 3.6: non-finite render scale doesn't collapse the
+  // canvas to 0x0 / crash the rasterizer
+  // ---------------------------------------------------------------------
+  async function runTestI(): Promise<TestResult> {
+    const sourceBytes = await buildTextVectorPdfBytes(1);
+    const file = toFile(sourceBytes, "non-finite-scale-fixture.pdf");
+
+    const sourcePdf = await PDFDocument.load(sourceBytes);
+    const sourceDims = sourcePdf.getPages().map((p) => p.getSize());
+
+    // Before the Phase 3.6 fix, a non-finite `scale` (e.g. from a bad
+    // upstream computation) sailed through computeSafeRenderScale
+    // unchanged (it deliberately no-ops on a non-finite longestSide) and
+    // then through the old `Math.max(1, Math.ceil(renderViewport.width))`
+    // canvas-size expression, which also propagates NaN. Assigning a
+    // non-finite value to canvas.width/height is silently coerced to 0 by
+    // the canvas spec, producing a 0x0 canvas and a confusing downstream
+    // failure in page.render()/JPEG encoding instead of a usable image.
+    // computeSafeCanvasDimension() now guards that assignment directly.
+    const outputBytes = await rasterizePDFWithSettings(
+      file,
+      { scale: NaN, quality: 0.8 },
+      true,
+    );
+    const outputPdf = await PDFDocument.load(outputBytes); // throws if malformed
+    const outputDims = outputPdf.getPages().map((p) => p.getSize());
+
+    const dimensionsPreserved = sourceDims.every((d, i) => {
+      const out = outputDims[i];
+      return Math.abs(d.width - out.width) < 1 && Math.abs(d.height - out.height) < 1;
+    });
+
+    return {
+      success: true,
+      notEmpty: outputBytes.length > 0,
+      loadableByPdfLib: true,
+      pageCountPreserved: outputPdf.getPageCount() === sourcePdf.getPageCount(),
+      dimensionsPreserved,
+    };
+  }
+
   // Formats any thrown value (Error or not) into a message+stack string so
   // Playwright can see the *actual* failure instead of just a timeout.
   function describeError(err: unknown): string {
@@ -420,6 +462,9 @@ export default function CompressionTestPage() {
           case "test-h-extreme-page-size":
             result = await runTestH();
             break;
+          case "test-i-non-finite-scale":
+            result = await runTestI();
+            break;
           default:
             throw new Error(`Unknown test: ${testName}`);
         }
@@ -472,6 +517,9 @@ export default function CompressionTestPage() {
         </button>
         <button data-testid="run-test-h" onClick={() => window.runCompressionTest?.("test-h-extreme-page-size")}>
           Test H: Extreme Page Size
+        </button>
+        <button data-testid="run-test-i" onClick={() => window.runCompressionTest?.("test-i-non-finite-scale")}>
+          Test I: Non-Finite Scale
         </button>
       </div>
     </div>

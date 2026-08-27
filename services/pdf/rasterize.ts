@@ -97,6 +97,37 @@ export function computeSafeRenderScale(
   return scale * (maxDimension / longestSide);
 }
 
+// Phase 3.6 — Rasterizer robustness / edge-case hardening (next gap after
+// Phase 3.5's canvas-size guard).
+//
+// canvas.width/height were computed as `Math.max(1, Math.ceil(value))`.
+// That reads as a safe floor, but Math.max/Math.ceil both propagate NaN:
+// `Math.max(1, Math.ceil(NaN))` is NaN, not 1. Per the HTML canvas spec,
+// assigning a non-finite number to canvas.width/height then silently
+// coerces to 0. So a non-finite renderViewport dimension slipped straight
+// past the existing guard into an unusable canvas, with no clear error —
+// just a confusing downstream failure in page.render()/JPEG encoding.
+//
+// This is reachable because rasterizePDFWithSettings is an exported,
+// directly-callable function that performs no validation on `settings`:
+// nothing today stops a caller from passing a non-finite `scale`. It's
+// also distinct from Phase 3.5's guard: computeSafeRenderScale above
+// explicitly returns `scale` unchanged whenever its own longestSide
+// computation is non-finite (it can't meaningfully clamp a broken
+// number), so a non-finite scale sails through it unchanged into the raw
+// canvas assignment this function guards instead.
+//
+// For every existing finite value this returns exactly what the old
+// `Math.max(1, Math.ceil(value))` expression already returned, so no
+// currently-tested page's rendered resolution changes.
+export function computeSafeCanvasDimension(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+
+  return Math.max(1, Math.ceil(value));
+}
+
 /**
  * Converts a PDF into a new PDF made from compressed JPEG page images.
  *
@@ -188,8 +219,8 @@ export async function rasterizePDFWithSettings(
 
       const canvas = document.createElement("canvas");
 
-      canvas.width = Math.max(1, Math.ceil(renderViewport.width));
-      canvas.height = Math.max(1, Math.ceil(renderViewport.height));
+      canvas.width = computeSafeCanvasDimension(renderViewport.width);
+      canvas.height = computeSafeCanvasDimension(renderViewport.height);
 
       const context = canvas.getContext("2d");
 
