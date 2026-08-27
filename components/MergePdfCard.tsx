@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { mergePdfs, type MergeResult } from "../services/pdf/merge";
 import ResultPanel from "./ResultPanel";
 import { formatFileSize } from "./ResultCard";
+import MultiFileUploadZone from "./MultiFileUploadZone";
 
 interface QueuedFile {
   id: string;
@@ -53,10 +54,8 @@ function moveItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
 let nextQueuedFileId = 0;
 
 export default function MergePdfCard() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const isProcessingRef = useRef(false);
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
-  const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<MergeResult | null>(null);
@@ -123,10 +122,6 @@ export default function MergePdfCard() {
     setQueuedFiles([]);
     setResult(null);
     setError(null);
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
   };
 
   const canMerge = queuedFiles.length >= 2 && !isProcessing;
@@ -145,59 +140,14 @@ export default function MergePdfCard() {
           </p>
         </div>
 
-        <input
-          ref={fileInputRef}
-          type="file"
+        <MultiFileUploadZone
           accept=".pdf,application/pdf"
-          multiple
-          className="hidden"
-          onChange={(event) => {
-            addFiles(event.target.files);
-            event.target.value = "";
-          }}
+          title="Choose PDFs to merge"
+          helperText="or drag and drop multiple files here · they'll be combined into one PDF in the order you set below"
+          onFilesSelect={addFiles}
+          disabled={uploadDisabled}
+          className="mx-4 sm:mx-6 mt-6 mb-4"
         />
-
-        <div
-          role="button"
-          tabIndex={0}
-          aria-disabled={uploadDisabled || undefined}
-          onClick={() => {
-            if (!uploadDisabled) fileInputRef.current?.click();
-          }}
-          onKeyDown={(event) => {
-            if (uploadDisabled) return;
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              fileInputRef.current?.click();
-            }
-          }}
-          onDragEnter={() => {
-            if (!uploadDisabled) setIsDragging(true);
-          }}
-          onDragLeave={() => setIsDragging(false)}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-            setIsDragging(false);
-            if (uploadDisabled) return;
-            addFiles(event.dataTransfer.files);
-          }}
-          className={`mx-4 sm:mx-6 mt-6 mb-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors ${
-            uploadDisabled
-              ? "cursor-not-allowed border-gray-200 bg-gray-50 opacity-60"
-              : isDragging
-                ? "cursor-pointer border-blue-500 bg-blue-50"
-                : "cursor-pointer border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
-          }`}
-        >
-          <p className="text-base font-medium text-gray-800 text-center">
-            Choose PDFs to merge
-          </p>
-          <p className="mt-1 text-sm text-gray-500 text-center">
-            or drag and drop multiple files here &middot; they&apos;ll be
-            combined into one PDF in the order you set below
-          </p>
-        </div>
 
         <div className="px-4 sm:px-6 pb-6">
           {error && (

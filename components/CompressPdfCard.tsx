@@ -9,6 +9,7 @@ import {
 } from "../services/pdf/compress";
 
 import ResultCard, { formatFileSize } from "./ResultCard";
+import UploadZone from "./UploadZone";
 
 interface CompressionOptionTrait {
   /** Small leading glyph, matching the emoji-tag pattern already used in ResultCard. */
@@ -88,14 +89,12 @@ function downloadPdfBytes(bytes: Uint8Array, filename: string): void {
 }
 
 export default function CompressPdfCard() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const isProcessingRef = useRef(false);
   const analysisRequestIdRef = useRef(0);
 
   const [compressionMode, setCompressionMode] =
     useState<CompressionMode>("light");
   const [customSize, setCustomSize] = useState("");
-  const [isDragging, setIsDragging] = useState(false);
 
   // Selected PDF file, validation error, and post-download success message
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -179,33 +178,6 @@ export default function CompressPdfCard() {
     setAnalysis(null);
     setAnalysisError(null);
     setIsAnalyzing(false);
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  };
-
-  /** Opens the hidden file picker when the drop zone is clicked. Locked while a compression is running. */
-  const openFilePicker = () => {
-    if (isProcessing) return;
-    fileInputRef.current?.click();
-  };
-
-  /** Reads the file chosen via the hidden input. */
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    handleFileSelection(e.target.files?.[0]);
-    // Reset input so the same file can be re-selected after clearing
-    e.target.value = "";
-  };
-
-  /** Accepts a file dropped onto the upload area. Dropped files are ignored while compression is running. */
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragging(false);
-
-    if (isProcessing) return;
-
-    handleFileSelection(e.dataTransfer.files?.[0]);
   };
 
   const trimmedCustomSize = customSize.trim();
@@ -266,81 +238,46 @@ export default function CompressPdfCard() {
   return (
     <div className="w-full max-w-2xl mx-auto px-4 sm:px-6">
       <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
-        {/* Hidden file input — opened programmatically on drop-zone click */}
-        <input
-          ref={fileInputRef}
-          type="file"
+        <UploadZone
           accept=".pdf,application/pdf"
-          className="hidden"
-          onChange={handleInputChange}
-        />
-
-        <div
-          role="button"
-          tabIndex={0}
-          aria-disabled={isProcessing}
-          onClick={openFilePicker}
-          onKeyDown={(e) => {
-            if (isProcessing) return;
-
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              openFilePicker();
-            }
-          }}
-          className={`mx-4 sm:mx-6 mt-6 sm:mt-8 mb-6 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-12 sm:py-16 transition-colors ${
+          size="spacious"
+          title={
             isProcessing
-              ? "cursor-not-allowed border-gray-200 bg-gray-100"
-              : `cursor-pointer ${
-                  isDragging
-                    ? "border-blue-500 bg-blue-50"
-                    : "border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
-                }`
-          }`}
-          onDragEnter={() => {
-            if (!isProcessing) setIsDragging(true);
-          }}
-          onDragLeave={() => setIsDragging(false)}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={handleDrop}
-        >
-          <div
-            className={`flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-full ${
-              isProcessing
-                ? "bg-gray-200 text-gray-400"
-                : "bg-blue-100 text-blue-600"
-            }`}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={1.5}
-              stroke="currentColor"
-              className="h-7 w-7 sm:h-8 sm:w-8"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
-              />
-            </svg>
-          </div>
-
-          <p
-            className={`mt-4 text-base sm:text-lg font-medium text-center ${
-              isProcessing ? "text-gray-400" : "text-gray-800"
-            }`}
-          >
-            {isProcessing
               ? "Upload locked while your PDF is being compressed"
-              : "Drag & Drop your PDF here"}
-          </p>
-          <p className="mt-1 text-sm text-gray-500">
-            {isProcessing ? "Please wait for the current file to finish." : "or click to browse"}
-          </p>
-        </div>
+              : "Drag & Drop your PDF here"
+          }
+          helperText={
+            isProcessing ? "Please wait for the current file to finish." : "or click to browse"
+          }
+          onFileSelect={handleFileSelection}
+          disabled={isProcessing}
+          className="mx-4 sm:mx-6 mt-6 sm:mt-8 mb-6"
+          icon={
+            <div
+              className={`mb-4 flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-full ${
+                isProcessing
+                  ? "bg-gray-200 text-gray-400"
+                  : "bg-blue-100 text-blue-600"
+              }`}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1.5}
+                stroke="currentColor"
+                className="h-7 w-7 sm:h-8 sm:w-8"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
+                />
+              </svg>
+            </div>
+          }
+        />
 
         {/* File details, validation error, or success message */}
         {(selectedFile || error || successMessage) && (

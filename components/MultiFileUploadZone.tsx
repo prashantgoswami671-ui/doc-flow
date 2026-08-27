@@ -1,60 +1,42 @@
-// components/UploadZone.tsx
+// components/MultiFileUploadZone.tsx
 "use client";
 
 import { useRef, useState } from "react";
-import type { ReactNode } from "react";
 
-export type UploadZoneProps = {
-  /** Called with the first file coming from click-to-browse or drop. */
-  onFileSelect: (file: File | undefined) => void;
+export type MultiFileUploadZoneProps = {
+  /** Called with every file coming from click-to-browse or drop, in order. */
+  onFilesSelect: (files: FileList) => void;
   accept?: string;
   title?: string;
   helperText?: string;
   disabled?: boolean;
   /** Layout-only classes for the outer zone (margins/spacing owned by the parent card). */
   className?: string;
-  /**
-   * Optional presentational content rendered above the title/helper text
-   * (e.g. an icon badge). Purely presentational — UploadZone does not
-   * interpret or style its contents beyond positioning. Omit for the
-   * original icon-less layout.
-   */
-  icon?: ReactNode;
-  /**
-   * Visual density of the drop zone. "default" (the default) matches the
-   * original UploadZone sizing (px-6 py-10, text-base title) used by every
-   * existing consumer. "spacious" is a backward-compatible opt-in for
-   * Compress PDF's larger, icon-led drop zone (px-6 py-12 sm:py-16,
-   * text-base sm:text-lg title) — it changes nothing for callers that omit
-   * this prop.
-   */
-  size?: "default" | "spacious";
 };
 
 /**
- * Generic upload interaction primitive: hidden file input, click-to-browse,
- * keyboard activation, and drag-and-drop with a drag-over visual state.
+ * Multi-file sibling of UploadZone: the same interaction primitive (hidden
+ * file input, click-to-browse, keyboard activation, and drag-and-drop with
+ * a drag-over visual state), but accepts and hands back every
+ * selected/dropped file via a FileList instead of a single File.
  *
- * It intentionally knows nothing about PDFs, validation, or DocFlow business
- * logic — it only hands the selected File to `onFileSelect`.
+ * Deliberately kept separate from UploadZone rather than added to it:
+ * UploadZone's contract explicitly hands back one File, and its existing
+ * consumers depend on that shape. This component exists only for tools
+ * that need multi-file selection — queueing, reordering, removing, and
+ * previewing individual files remains entirely the caller's responsibility,
+ * exactly as it already was before this component existed.
  */
-export default function UploadZone({
-  onFileSelect,
+export default function MultiFileUploadZone({
+  onFilesSelect,
   accept,
   title,
   helperText,
   disabled = false,
   className = "",
-  icon,
-  size = "default",
-}: UploadZoneProps) {
+}: MultiFileUploadZoneProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
-
-  const paddingClasses =
-    size === "spacious" ? "px-6 py-12 sm:py-16" : "px-6 py-10";
-  const titleSizeClasses =
-    size === "spacious" ? "text-base sm:text-lg" : "text-base";
 
   const openFilePicker = () => {
     if (disabled) return;
@@ -67,10 +49,13 @@ export default function UploadZone({
         ref={fileInputRef}
         type="file"
         accept={accept}
+        multiple
         className="hidden"
         disabled={disabled}
         onChange={(event) => {
-          onFileSelect(event.target.files?.[0]);
+          if (event.target.files && event.target.files.length > 0) {
+            onFilesSelect(event.target.files);
+          }
           event.target.value = "";
         }}
       />
@@ -100,9 +85,11 @@ export default function UploadZone({
           event.preventDefault();
           setIsDragging(false);
           if (disabled) return;
-          onFileSelect(event.dataTransfer.files?.[0]);
+          if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
+            onFilesSelect(event.dataTransfer.files);
+          }
         }}
-        className={`${className} flex flex-col items-center justify-center rounded-xl border-2 border-dashed ${paddingClasses} transition-colors outline-none ${
+        className={`${className} flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors outline-none ${
           disabled
             ? "cursor-not-allowed border-gray-200 bg-gray-50"
             : `cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
@@ -112,11 +99,9 @@ export default function UploadZone({
               }`
         }`}
       >
-        {icon}
-
         {title && (
           <p
-            className={`${titleSizeClasses} font-medium text-center ${
+            className={`text-base font-medium text-center ${
               disabled ? "text-gray-400" : "text-gray-800"
             }`}
           >
@@ -125,7 +110,7 @@ export default function UploadZone({
         )}
         {helperText && (
           <p
-            className={`mt-1 text-sm ${
+            className={`mt-1 text-sm text-center ${
               disabled ? "text-gray-400" : "text-gray-500"
             }`}
           >

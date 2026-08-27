@@ -18,6 +18,7 @@ import {
 } from "../services/pdf/imageToPdf";
 import ResultPanel from "./ResultPanel";
 import { formatFileSize } from "./ResultCard";
+import MultiFileUploadZone from "./MultiFileUploadZone";
 
 interface QueuedImage {
   id: string;
@@ -111,12 +112,10 @@ function CheckIcon() {
 let nextQueuedImageId = 0;
 
 export default function ImageToPdfCard() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const isProcessingRef = useRef(false);
   const queuedImagesRef = useRef<QueuedImage[]>([]);
 
   const [queuedImages, setQueuedImages] = useState<QueuedImage[]>([]);
-  const [isDragging, setIsDragging] = useState(false);
 
   const [filterPreset, setFilterPreset] = useState<FilterPreset>(DEFAULT_FILTER);
   const [pageSize, setPageSize] = useState<PageSizeOption>(DEFAULT_PAGE_SIZE);
@@ -441,10 +440,6 @@ export default function ImageToPdfCard() {
     setFitMode(DEFAULT_FIT_MODE);
     setResult(null);
     setError(null);
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
   };
 
   const selectClasses =
@@ -487,59 +482,14 @@ export default function ImageToPdfCard() {
           </p>
         </div>
 
-        <input
-          ref={fileInputRef}
-          type="file"
+        <MultiFileUploadZone
           accept=".jpg,.jpeg,.png,image/jpeg,image/png"
-          multiple
-          className="hidden"
-          onChange={(event) => {
-            addFiles(event.target.files);
-            event.target.value = "";
-          }}
+          title="Choose images to convert"
+          helperText="or drag and drop them here · JPG, JPEG, or PNG · select multiple files · each becomes one PDF page"
+          onFilesSelect={addFiles}
+          disabled={uploadDisabled}
+          className="mx-4 sm:mx-6 mt-6 mb-4"
         />
-
-        <div
-          role="button"
-          tabIndex={0}
-          aria-disabled={uploadDisabled || undefined}
-          onClick={() => {
-            if (!uploadDisabled) fileInputRef.current?.click();
-          }}
-          onKeyDown={(event) => {
-            if (uploadDisabled) return;
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              fileInputRef.current?.click();
-            }
-          }}
-          onDragEnter={() => {
-            if (!uploadDisabled) setIsDragging(true);
-          }}
-          onDragLeave={() => setIsDragging(false)}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-            setIsDragging(false);
-            if (uploadDisabled) return;
-            addFiles(event.dataTransfer.files);
-          }}
-          className={`mx-4 sm:mx-6 mt-6 mb-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors ${
-            uploadDisabled
-              ? "cursor-not-allowed border-gray-200 bg-gray-50 opacity-60"
-              : isDragging
-                ? "cursor-pointer border-blue-500 bg-blue-50"
-                : "cursor-pointer border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
-          }`}
-        >
-          <p className="text-base font-medium text-gray-800 text-center">
-            Choose images to convert
-          </p>
-          <p className="mt-1 text-sm text-gray-500 text-center">
-            or drag and drop them here &middot; JPG, JPEG, or PNG &middot;
-            select multiple files &middot; each becomes one PDF page
-          </p>
-        </div>
 
         <div className="px-4 sm:px-6 pb-6">
           {error && (

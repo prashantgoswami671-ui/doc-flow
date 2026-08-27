@@ -28,6 +28,7 @@ import {
   type CropEditorPreview,
   type SinglePagePreview,
 } from "../services/pdf/thumbnails";
+import UploadZone from "./UploadZone";
 
 const rotationOptions: { rotation: PageRotation; label: string }[] = [
   { rotation: 90, label: "Rotate 90°" },
@@ -172,14 +173,12 @@ function clientPointToNativePixels(
 }
 
 export default function OrganizePagesCard() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const isProcessingRef = useRef(false);
   const previewRequestIdRef = useRef(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [pages, setPages] = useState<ManagedPage[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
   const [isLoadingPreviews, setIsLoadingPreviews] = useState(false);
   const [previewProgress, setPreviewProgress] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -315,10 +314,6 @@ export default function OrganizePagesCard() {
     previewImageCacheRef.current.clear();
     resetLargePreviewState();
     resetEditorState();
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
   };
 
   const loadPreviews = async (file: File) => {
@@ -886,68 +881,24 @@ export default function OrganizePagesCard() {
           </p>
         </div>
 
-        <input
-          ref={fileInputRef}
-          type="file"
+        <UploadZone
           accept=".pdf,application/pdf"
-          className="hidden"
-          disabled={uploadDisabled}
-          onChange={(event) => {
-            selectFile(event.target.files?.[0]);
-            event.target.value = "";
-          }}
-        />
-
-        <div
-          role="button"
-          tabIndex={uploadDisabled ? -1 : 0}
-          aria-disabled={uploadDisabled}
-          onClick={() => {
-            if (!uploadDisabled) fileInputRef.current?.click();
-          }}
-          onKeyDown={(event) => {
-            if (uploadDisabled) return;
-
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              fileInputRef.current?.click();
-            }
-          }}
-          onDragEnter={() => {
-            if (!uploadDisabled) setIsDragging(true);
-          }}
-          onDragLeave={() => setIsDragging(false)}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-            setIsDragging(false);
-            if (!uploadDisabled) selectFile(event.dataTransfer.files?.[0]);
-          }}
-          className={`mx-4 sm:mx-6 mt-6 mb-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 transition-colors ${
+          title={
             uploadDisabled
-              ? "cursor-not-allowed border-gray-200 bg-gray-100"
-              : `cursor-pointer ${
-                  isDragging
-                    ? "border-blue-500 bg-blue-50"
-                    : "border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
-                }`
-          }`}
-        >
-          <p
-            className={`text-base font-medium text-center ${
-              uploadDisabled ? "text-gray-400" : "text-gray-800"
-            }`}
-          >
-            {uploadDisabled
               ? isProcessing
                 ? "Upload locked while changes are being applied"
                 : "Upload locked while previews are loading"
-              : "Choose a PDF to organize"}
-          </p>
-          <p className="mt-1 text-sm text-gray-500">
-            {uploadDisabled ? "Please wait for the current step to finish." : "or drag and drop it here"}
-          </p>
-        </div>
+              : "Choose a PDF to organize"
+          }
+          helperText={
+            uploadDisabled
+              ? "Please wait for the current step to finish."
+              : "or drag and drop it here"
+          }
+          onFileSelect={selectFile}
+          disabled={uploadDisabled}
+          className="mx-4 sm:mx-6 mt-6 mb-4"
+        />
 
         <div className="px-4 sm:px-6 pb-6">
           {selectedFile && (

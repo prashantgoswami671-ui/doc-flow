@@ -9,6 +9,7 @@ import {
   type InsertPagesResult,
 } from "../services/pdf/insertPages";
 import ResultPanel from "./ResultPanel";
+import UploadZone from "./UploadZone";
 
 function isPdfFile(file: File): boolean {
   return (
@@ -55,58 +56,18 @@ function PdfPicker({
   disabled,
   onSelect,
 }: PdfPickerProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isDragging, setIsDragging] = useState(false);
-
   return (
     <div>
       <p className="text-sm font-medium text-gray-700">{label}</p>
 
-      <input
-        ref={fileInputRef}
-        type="file"
+      <UploadZone
         accept=".pdf,application/pdf"
-        className="hidden"
+        title={helperText}
+        helperText="or drag and drop it here"
+        onFileSelect={onSelect}
         disabled={disabled}
-        onChange={(event) => {
-          onSelect(event.target.files?.[0]);
-          event.target.value = "";
-        }}
+        className="mt-2 px-4 py-6"
       />
-
-      <div
-        role="button"
-        tabIndex={disabled ? -1 : 0}
-        aria-disabled={disabled}
-        onClick={() => !disabled && fileInputRef.current?.click()}
-        onKeyDown={(event) => {
-          if (disabled) return;
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            fileInputRef.current?.click();
-          }
-        }}
-        onDragEnter={() => !disabled && setIsDragging(true)}
-        onDragLeave={() => setIsDragging(false)}
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => {
-          event.preventDefault();
-          setIsDragging(false);
-          if (!disabled) onSelect(event.dataTransfer.files?.[0]);
-        }}
-        className={`mt-2 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-6 transition-colors ${
-          disabled
-            ? "cursor-not-allowed border-gray-200 bg-gray-100 opacity-60"
-            : isDragging
-              ? "cursor-pointer border-blue-500 bg-blue-50"
-              : "cursor-pointer border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50"
-        }`}
-      >
-        <p className="text-sm font-medium text-gray-800 text-center">
-          {helperText}
-        </p>
-        <p className="mt-1 text-xs text-gray-500">or drag and drop it here</p>
-      </div>
 
       {file && (
         <div className="mt-2 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
