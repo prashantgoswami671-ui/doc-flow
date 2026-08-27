@@ -372,6 +372,30 @@ describe("compressPDF — custom compression: target below original size", () =>
     );
     expect(result.processedSize).toBeLessThan(result.originalSize);
   });
+
+  it("converges for a high-resolution scan fixture with a reachable target", async () => {
+    const sourceBytes = await buildHighResScanPdfBytes();
+    const file = toFile(sourceBytes);
+    const targetBytes = Math.floor(sourceBytes.length * 0.5);
+    const targetMb = targetBytes / (1024 * 1024);
+
+    mockRasterizePDFWithSettings.mockImplementation(async (_file, settings) => {
+      const level =
+        (settings.scale - 0.75) / (2.0 - 0.75);
+      const size = Math.round(
+        sourceBytes.length * 0.2 + sourceBytes.length * 0.6 * level,
+      );
+
+      return new Uint8Array(size);
+    });
+
+    const result = await compressPDF(file, "custom", targetMb);
+
+    expect(mockRasterizePDFWithSettings).toHaveBeenCalled();
+    expect(result.processedSize).toBeLessThanOrEqual(targetBytes);
+    expect(result.processedSize).toBeLessThan(result.originalSize);
+    expect(result.pageCount).toBe(1);
+  });
 });
 
 describe("compressPDF — custom compression: range regression (unchanged by Light-settings change)", () => {
@@ -488,13 +512,16 @@ describe("compressPDF — empty PDF (zero pages)", () => {
   });
 });
 
-describe("compressPDF — fixture coverage: mixed, scan, unusual page sizes, high-res", () => {
-  it.each([
+describe("compressPDF — fixture coverage: mixed, scan, unusual page sizes, high-res, image-heavy", () => {
+  const fixtureCases = [
     ["mixed content", buildMixedPdfBytes, 3],
     ["scanned/image-only", () => buildScannedImageOnlyPdfBytes(2), 2],
     ["unusual page sizes", buildUnusualPageSizePdfBytes, 3],
     ["high-resolution scan", buildHighResScanPdfBytes, 1],
-  ] as const)(
+    ["image-heavy", () => buildImageHeavyPdfBytes(2), 2],
+  ] as const;
+
+  it.each(fixtureCases)(
     "light mode preserves page count and produces a valid PDF for a %s fixture",
     async (_label, buildFixture, expectedPageCount) => {
       const sourceBytes = await buildFixture();
@@ -502,6 +529,22 @@ describe("compressPDF — fixture coverage: mixed, scan, unusual page sizes, hig
       mockRasterizePDF.mockResolvedValue(smallerOutput);
 
       const result = await compressPDF(toFile(sourceBytes), "light");
+
+      expect(result.pageCount).toBe(expectedPageCount);
+      await expect(loadPageCount(result.bytes)).resolves.toBe(
+        expectedPageCount,
+      );
+    },
+  );
+
+  it.each(fixtureCases)(
+    "heavy mode preserves page count and produces a valid PDF for a %s fixture",
+    async (_label, buildFixture, expectedPageCount) => {
+      const sourceBytes = await buildFixture();
+      const smallerOutput = await buildSmallerValidPdf(expectedPageCount, sourceBytes);
+      mockRasterizePDF.mockResolvedValue(smallerOutput);
+
+      const result = await compressPDF(toFile(sourceBytes), "heavy");
 
       expect(result.pageCount).toBe(expectedPageCount);
       await expect(loadPageCount(result.bytes)).resolves.toBe(
