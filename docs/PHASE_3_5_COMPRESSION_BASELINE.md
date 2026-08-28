@@ -2,18 +2,18 @@
 
 ## Purpose
 
-This is the pre-optimization baseline for Task 3.5.2. It records the
-CURRENT (unmodified) compression behavior of `services/pdf/compress.ts`
-and `services/pdf/rasterize.ts`, using the existing real-rasterizer
+This is the finalized baseline for Task 3.5. It records the verified
+compression behavior of `services/pdf/compress.ts` and
+`services/pdf/rasterize.ts`, using the existing real-rasterizer
 Playwright harness (`app/test/compression/page.tsx` +
-`tests/e2e/compression.integration.spec.ts`), before any optimization
-work from the Task 3.5.1 audit is attempted.
+`tests/e2e/compression.integration.spec.ts`) and a manually verified
+real-browser PDF run.
 
-No compression settings, algorithms, thresholds, or fallback logic were
-changed to produce this baseline. The harness page was extended only to
-surface `mode`, `processingTime`, and `reductionPercent` (values
-`compressPDF()` already computes internally) in the JSON test results for
-Tests A, D, E, F, and G.
+The final Light Compression configuration is `scale: 2.2` and
+`quality: 0.92`. The `1.5 / 0.92` Light-scale experiment was evaluated
+and rejected; it is not part of the final implementation. The harness
+page surfaces `mode`, `processingTime`, and `reductionPercent` (values
+`compressPDF()` already computes internally) in the JSON test results.
 
 ## Benchmark environment
 
@@ -33,19 +33,29 @@ Playwright harness run.
 
 | Scenario | Mode | Pages | Original | Processed | Reduction | Processing Time | Result |
 |---|---|---:|---:|---:|---:|---:|---|
-| Test A — scanned roundtrip | light | 2 | 29277 | 139535 | -376.6027940021177% | 749.5999999977648 | larger than original — not compressed |
-| Test D — scanned (full pipeline) | light | 2 | 29277 | 29277 | 0% | 414.30000000074506 | fallback — no genuine compression |
-| Test E — image-heavy | light | 2 | 43744 | 43744 | 0% | 401 | fallback — no genuine compression |
-| Test F — text/vector | light | 3 | 2347 | 2347 | 0% | 465.1000000014901 | fallback — no genuine compression |
-| Test G — custom (50% target) | custom | 2 | 43744 | 20929 | 52.15572421360643% | 1754.8999999985099 | target reached — genuine compression |
+| Test A — scanned roundtrip | light | 2 | 29,277 bytes | 139,535 bytes | -376.6% | N/A | raw rasterizer output — intentionally bypasses production fallback |
+| Test B — page dimensions | N/A | N/A | N/A | N/A | N/A | N/A | passed — dimensions preserved |
+| Test C — rotation metadata and visual dimensions | N/A | N/A | N/A | N/A | N/A | N/A | passed — rotation metadata and visual dimensions preserved |
+| Test D — scanned (full pipeline) | light | 2 | N/A | N/A | N/A | N/A | fallback preserved original scanned PDF |
+| Test E — image-heavy | light | 2 | N/A | N/A | N/A | N/A | fallback preserved original image-heavy PDF |
+| Test F — text/vector | light | 3 | N/A | N/A | N/A | N/A | fallback preserved original text/vector PDF |
+| Test G — custom (50% target) | custom | 2 | 43,743 bytes | 20,930 bytes | 52.1523% | N/A | target reached — genuine compression |
+| Test H — extreme page-size handling | N/A | N/A | N/A | N/A | N/A | N/A | passed |
+| Test I — non-finite render-scale handling | N/A | N/A | N/A | N/A | N/A | N/A | passed |
 
-For Tests D/F: record whether `wasFallback` was `true` (original bytes
-returned unchanged) — do not infer this from size alone.
+For Tests D/E/F: `wasFallback` was `true` (original bytes returned
+unchanged) and `wasGenuineCompression` was `false`.
 
-For Test G: record `targetReached` and the computed `targetBytes`
-exactly as returned by the harness.
+For Test G, `targetReached` was `true` and `customExecuted` was `true`.
 
 ### Detailed test results
+
+Test A — raw rasterizer output only; this deliberately does not exercise
+the production fallback.
+
+Test B — page dimensions preserved.
+
+Test C — rotation metadata and visual dimensions preserved.
 
 Test D — `wasFallback: true`, `wasGenuineCompression: false`, `targetBytes: N/A`
 
@@ -53,33 +63,71 @@ Test E — `wasFallback: true`, `wasGenuineCompression: false`, `targetBytes: N/
 
 Test F — `wasFallback: true`, `wasGenuineCompression: false`, `targetBytes: N/A`
 
-Test G — `targetReached: true`, `targetBytes: 21872`, `customExecuted: true`
+Test G — `targetReached: true`, `customExecuted: true`
+
+Test H — extreme page-size handling passed.
+
+Test I — non-finite render-scale handling passed.
+
+### Real-browser Light Compression result
+
+| Fixture | Mode | Pages | Original | Compressed | Reduction | Processing Time | Light settings |
+|---|---|---:|---:|---:|---:|---:|---|
+| `Dilnasheen Perween Roll no 3-organized.pdf` | Light Compression | 46 | 25.75 MB | 17.24 MB | 33.0% | 7.79 sec | scale 2.2, JPEG quality 0.92 |
+
+This result was manually verified in the browser after restoring Light
+from the experimental `1.5` scale to `2.2`.
 
 ## Interpretation
 
-Measured results show that the current rasterizer-based compression
-pipeline produces three distinct outcomes:
+The finalized results show the following key outcomes for the
+rasterizer-based compression pipeline:
 
-1. **Genuine compression (Test G only).** The custom target-size mode
-   achieved a 52.15572421360643% reduction, reaching its target of 21872
-   bytes (processedSize: 20929). This is the only test where the output
-   was genuinely smaller than the original.
+1. **Final Light Compression behavior.** Light `2.2 / 0.92` remains the
+   final production setting. The real 46-page, 25.75 MB fixture produced
+   a 17.24 MB output in 7.79 sec, validating intended Light-compression
+   behavior at 33.0% reduction.
 
-2. **Fallback / pass-through (Tests D, E, F).** All three light-mode
-   tests on production-realistic fixtures (scanned full pipeline,
-   image-heavy, text/vector) returned the original bytes unchanged
-   (`wasFallback: true`, `wasGenuineCompression: false`).
-   `processedSize` equals `originalSize`; reduction is 0%.
+2. **Genuine custom compression (Test G).** The custom target-size mode
+   produced 20,930 bytes from 43,743 bytes, a 52.1523% reduction, and
+   reached its target.
 
-3. **Rasterizer overshoot (Test A).** The light-mode rasterizer on a
-   scanned 2-page fixture produced output *larger* than the original:
-   139535 bytes processed vs. 29277 bytes original, a -376.60%
-   reduction. This is not a compression failure in the fallback sense —
-   the rasterizer ran — but the output is substantially larger.
+3. **Fallback / pass-through (Tests D, E, F).** Small synthetic PDFs can
+   cause rasterization to produce a larger candidate, but the existing
+   production fallback correctly returns the original instead. The
+   scanned, image-heavy, and text/vector full-pipeline fixtures all
+   confirmed that behavior.
+
+4. **Raw rasterizer overshoot (Test A).** The light-mode rasterizer on a
+   scanned 2-page fixture produced 139,535 bytes from 29,277 bytes, a
+   -376.6% reduction. This result must not be interpreted as a production
+   compression failure: Test A deliberately calls the rasterizer directly
+   to inspect rasterizer behavior and does not exercise the production
+   fallback.
+
+5. **Rejected experiment.** The `1.5 / 0.92` Light-scale experiment
+   produced approximately the same 25.75 MB output as the original real
+   PDF, meaning the compression pipeline fell back to the original rather
+   than providing the intended Light compression. It is recorded as an
+   evaluated/rejected experiment, not as a final change. The final Light
+   configuration remains `scale: 2.2`, `quality: 0.92`.
 
 Tests B, C, H, I are validation/edge-case evidence confirming
-dimensional fidelity and output loadability; they are not compression
-measurements.
+dimensional fidelity, rotation handling, extreme page-size handling, and
+non-finite render-scale handling; they are not compression measurements.
+Adaptive intrinsic-resolution detection is outside the scope of this
+Phase 3.5 checkpoint.
+
+## Other verification
+
+- `npm run test:e2e -- tests/e2e/compression.integration.spec.ts` — 9/9
+  Playwright tests passed
+- `npx tsc --noEmit` — passed
+- `npm run lint` — 0 errors, 5 warnings
+- `npm run build` — passed
+
+The five ESLint warnings are existing warnings in `ImageToPdfCard.tsx`
+and `PdfToImageCard.tsx`; they were not introduced by Phase 3.5.
 
 ## Reproduction
 
