@@ -46,7 +46,7 @@ Last reconciled: 2026-08-28, against live repo audit (git log, npm test, tsc, es
 | REL-06 | Phase 2 exit review | ✅ Done |
 
 ## Phase 3 — Compression & Optimization
-**Status: 🟡 Substantially done — 1 item open.**
+**Status: ✅ Closed.**
 
 | ID | Task | Status |
 |---|---|---|
@@ -56,9 +56,9 @@ Last reconciled: 2026-08-28, against live repo audit (git log, npm test, tsc, es
 | CMP-04 | Canvas-overflow guard | ✅ Done — `MAX_CANVAS_DIMENSION` / `computeSafeRenderScale` |
 | CMP-05 | Non-finite dimension guard | ✅ Done — `computeSafeCanvasDimension` |
 | CMP-06 | Before/after size + % reduction UX | ✅ Done — wired into `CompressPdfCard` |
-| CMP-07 | Confirm CMP-02 suite actually passes in a real browser run | 🔴 **Not verified since 3.4–3.6 landed.** Run `npm run test:e2e`. |
+| CMP-07 | Confirm CMP-02 suite actually passes in a real browser run | ✅ Done — 9/9 real-browser Playwright tests passed |
 | CMP-08 | "Quality explanation" UX copy | ✅ Done — Light/Heavy descriptions + traits make the size-vs-quality trade-off explicit; Custom help links target size to compression strength/quality; guarded by `components/CompressPdfCard.test.tsx` |
-| CMP-09 | Phase 3 exit review (mirror Phase 2's format) | 🔴 Not started — blocked on CMP-07 |
+| CMP-09 | Phase 3 exit review (mirror Phase 2's format) | ✅ Done — Phase 3 exit review completed |
 
 ## Phase 4 — Security & Privacy
 **Status: 🔴 Not started, one item pre-confirmed.**
@@ -124,4 +124,4 @@ Last reconciled: 2026-08-28, against live repo audit (git log, npm test, tsc, es
 - 🔴 Not done / not started
 - ⚪ Deferred by design — not a gap, a deliberate scope decision
 
-**Right now:** finish Phase 3 (CMP-07, CMP-09), then Phase 4 with SEC-06 as the AI-blocking item, then Phase 5 starts at AI-01. Nothing past AI-07 gets built until v1 has real usage data.
+**Right now:** Phase 4 with SEC-06 as the AI-blocking item, then Phase 5 starts at AI-01. Nothing past AI-07 gets built until v1 has real usage data.
