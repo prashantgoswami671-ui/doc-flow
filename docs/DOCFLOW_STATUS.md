@@ -66,7 +66,7 @@ Last reconciled: 2026-08-28, against live repo audit (git log, npm test, tsc, es
 | ID | Task | Status |
 |---|---|---|
 | SEC-01 | Dev-only AI tooling (`ai_assistant.py` etc.) isolated from production bundle | ✅ **Re-verified 2026-08-29** — no AI npm dependency in `package.json`/`package-lock.json`; actual tooling is standalone Python (`ai_assistant.py` etc.), not imported anywhere in `app/`/`components/`/`services/`; `.next/` build trace confirms no AI runtime dependency. No implementation change required. |
-| SEC-02 | Audit where PDFs are processed / what leaves the browser | 🔴 Not started |
+| SEC-02 | Audit where PDFs are processed / what leaves the browser | ✅ **Re-verified 2026-08-29** — all PDF processing is client-side; no Next.js API routes, route handlers, or server actions process PDFs; uploads and generated outputs are handled via browser File/ArrayBuffer/Blob/object URLs; no PDF bytes, filenames, or metadata are transmitted to third-party services. No implementation change required. |
 | SEC-03 | Temp-file cleanup | 🔴 Not started |
 | SEC-04 | Honest password/protection UX copy | 🔴 Not started |
 | SEC-05 | Privacy messaging + documentation (no unverified "100% private" claims) | 🔴 Not started |
