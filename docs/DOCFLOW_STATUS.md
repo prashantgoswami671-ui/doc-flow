@@ -65,7 +65,7 @@ Last reconciled: 2026-08-28, against live repo audit (git log, npm test, tsc, es
 
 | ID | Task | Status |
 |---|---|---|
-| SEC-01 | Dev-only AI tooling (`ai_assistant.py` etc.) isolated from production bundle | ✅ Confirmed — not imported anywhere in `app/`/`components/`/`services/` |
+| SEC-01 | Dev-only AI tooling (`ai_assistant.py` etc.) isolated from production bundle | ✅ **Re-verified 2026-08-29** — no AI npm dependency in `package.json`/`package-lock.json`; actual tooling is standalone Python (`ai_assistant.py` etc.), not imported anywhere in `app/`/`components/`/`services/`; `.next/` build trace confirms no AI runtime dependency. No implementation change required. |
 | SEC-02 | Audit where PDFs are processed / what leaves the browser | 🔴 Not started |
 | SEC-03 | Temp-file cleanup | 🔴 Not started |
 | SEC-04 | Honest password/protection UX copy | 🔴 Not started |
