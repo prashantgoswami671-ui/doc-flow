@@ -466,7 +466,9 @@ export default function CompressPdfCard() {
               <p id="custom-size-help" className="mt-2 text-xs text-gray-500">
                 DocFlow will try to reduce the PDF to this size. It&apos;s a
                 target, not a guarantee — if it can&apos;t be reached, you&apos;ll
-                get the smallest file DocFlow could produce instead.
+                get the smallest file DocFlow could produce instead. A smaller
+                target means stronger compression, so the output may look
+                noticeably lower quality.
               </p>
               {showCustomSizeError && (
                 <p className="mt-1 text-xs font-medium text-red-600">

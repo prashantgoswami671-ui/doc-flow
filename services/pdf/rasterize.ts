@@ -18,18 +18,12 @@ export function getSettings(mode: RasterCompressionMode): RasterSettings {
     };
   }
 
-  // Validated Light settings:
-  // scale 2.2 + JPEG quality 0.92 produced a 31.3% reduction
-  // on the real ~27 MB test PDF while remaining clear and readable.
-  // Scale controls rasterization resolution only; pageViewport below
-  // keeps the output PDF's physical page dimensions unchanged
+  // Validated Light settings (Phase 3.5 baseline):
+  // scale 2.2 + JPEG quality 0.92 produced a 31.3% reduction on the real
+  // ~27 MB test PDF while remaining clear and readable. Scale controls
+  // rasterization resolution only; pageViewport below keeps the output
+  // PDF's physical page dimensions unchanged.
   return {
-
-    // Validated Light settings: scale 2.2 / JPEG quality 0.92
-    // produced a 31.3% reduction on the real 27 MB test PDF while
-    // remaining clear and readable.
-
-
     scale: 2.2,
     quality: 0.92,
   };
