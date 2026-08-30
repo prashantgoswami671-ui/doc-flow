@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDED IN PART (SEC-06, 2026-08-30):** Section 2.3 lists "Temporary File Management" as a Version 1 core module. No such server-side module exists — DocFlow's shipped architecture processes PDFs entirely client-side, with no backend and nothing to temporarily store or clean up server-side (see `docs/DOCFLOW_STATUS.md`, Phase 4 / SEC-02, SEC-03, SEC-05). This claim predates that verification and does not reflect the shipped product. See `docs/SEC-06-AI-DATA-POLICY.md` and `docs/DOCFLOW_STATUS.md` for current, code-verified ground truth. Kept below for historical context only — do not use this document as a source for architecture, privacy, or module claims.
+
 # 2. Product Overview
 
 ## 2.1 Product Description

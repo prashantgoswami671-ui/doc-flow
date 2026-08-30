@@ -183,6 +183,8 @@ The system shall automatically remove uploaded and processed files after a confi
 - Files are deleted automatically.
 - Users are informed that temporary files are removed for privacy.
 
+> *SEC-06 note (2026-08-30): FR-010 as written describes server-side upload/retention that was never built and does not apply to the shipped client-side architecture. A future spec refresh replacing FR-010 must be written against `docs/SEC-06-AI-DATA-POLICY.md` and `docs/DOCFLOW_STATUS.md`, not against this historical text.*
+
 ---
 
 ## FR-011: Error Handling

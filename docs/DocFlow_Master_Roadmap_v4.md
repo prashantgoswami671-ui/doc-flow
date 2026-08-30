@@ -1,3 +1,5 @@
+> ⚠️ **HISTORICAL / SUPERSEDED (SEC-06, 2026-08-30):** This document is superseded by `docs/DocFlow_Master_Roadmap_v5.md`, which adds the Phase 5 AI Document Intelligence phase and moves detailed task-level tracking to `docs/DOCFLOW_STATUS.md`. Do not use this file for current planning or phase status — the phase numbering, current-phase pointer, and task list below are out of date. Kept for historical context only.
+
 # DocFlow — Master Product Roadmap (v4)
 Single source of truth • Revision date: 2026-08-27 (revision 3 — reconciled against actual repository state via full code/test audit; supersedes v3)
 
