@@ -1,7 +1,7 @@
 # SEC-06 — AI Data Security & Privacy Policy
-Status: **Approved policy document.** Documentation/policy scope only — no AI code exists yet.
-Source: `SEC-06 Read-Only Audit` (read-only inspection of the repository, no code modified).
-This is the authoritative reference for Phase 5 (`AI-01` onward) in `docs/DOCFLOW_STATUS.md`. Any future AI implementation must conform to this document. Do not begin `AI-01` until this policy is reviewed against the actual chosen provider/deployment and re-confirmed still accurate.
+Status: **Approved policy document, amended by SEC-07.** SEC-07 (Checkpoint 1) added the Tier 1 Browser AI category, the three-tier architecture framing, and the BYOK policy decision in §3 — see the "Amended by SEC-07" note there. AI-01/AI-02 foundation code now exists (`services/ai/`); no provider (Browser AI, Ollama, BYOK, Cloud) is implemented yet.
+Source: `SEC-06 Read-Only Audit` (read-only inspection of the repository, no code modified), amended per the approved Checkpoint 1 architecture (SEC-07).
+This is the authoritative reference for Phase 5 (`AI-01` onward) in `docs/DOCFLOW_STATUS.md`. Any future AI implementation must conform to this document. Do not begin an actual provider implementation until this policy is reviewed against the chosen provider/deployment and re-confirmed still accurate.
 
 ---
 
@@ -49,16 +49,51 @@ They must not contain the original PDF or unrelated document data.
 
 ---
 
-## 3. Provider categories
+## 3. Provider categories — three-tier architecture
 
-### Local Ollama
-A user-controlled Ollama service running on the user's device/loopback. Selected extracted text and the user's prompt may be sent from the browser to the configured local Ollama service. This must be disclosed to the user. Only describe it as "local" after the deployment has actually been verified as local/loopback — never assume.
+**Amended by SEC-07.** Phase 5 uses a three-tier, capability-based architecture (see `AI-01` in `docs/DOCFLOW_STATUS.md` and `docs/DocFlow_Master_Roadmap_v5.md`). Tiers describe user-facing packaging only — the underlying provider/runtime contract itself is capability-based, not tier-based (`services/ai/types.ts`), so a future runtime that doesn't fit these three tiers cleanly is still governed by §1/§2/§9 rather than left unregulated.
 
-### Self-hosted remote
-An Ollama or compatible AI service controlled by the user/organization but running on another machine/network. Treat this as a network transmission boundary. It must **not** be described as "local."
+### 3.1 Tier 1 — Browser AI (in-browser / embedded inference)
 
-### Third-party hosted provider
+AI inference that executes entirely inside the user's browser (e.g. an in-browser/embedded model runtime). This is a new category, added by SEC-07.
+
+- Inference executes locally in the browser.
+- The original PDF is never sent to an AI provider when using this mode.
+- No extracted text is sent to an external provider when using this mode.
+- No remote-provider consent flow (§6) is required for Browser AI, because there is no content-bearing remote transmission.
+- User-facing disclosure for Browser AI must be factual and scoped to what actually happens. Browser AI must **not** be described using unsupported blanket claims such as "100% private" or similarly absolute language, even though nothing leaves the browser in this mode — see §8.
+- Nothing in this category weakens the privacy rules that apply to Tier 2/Tier 3 providers below.
+
+### 3.2 Tier 2 — Ollama (local)
+
+A user-controlled Ollama service running on the user's own device/loopback. Selected extracted text and the user's prompt may be sent from the browser to the configured local Ollama service. This must be disclosed to the user using the §7 wording. Only describe a deployment as "local" after it has actually been verified as local/loopback — never assume this from configuration alone.
+
+### 3.3 Tier 3 — Advanced providers
+
+Two routes, both opt-in and both requiring explicit affirmative consent (§6) before any content-bearing request:
+
+- **Larger/local Ollama models** — governed by the same local-Ollama rules as §3.2; "advanced" describes the model, not a different transport or trust boundary.
+- **BYOK (bring your own key)** — a third-party provider the user selects and authenticates to with their own API key. See §3.5. BYOK must never be described or implied to be local processing — from a data-flow perspective it is a third-party-hosted remote provider, regardless of how directly the browser reaches it.
+
+### 3.4 Self-hosted remote
+
+An Ollama or compatible AI service controlled by the user/organization but running on another machine/network (not loopback/local). Treat this as a network transmission boundary. It must **not** be described as "local," and is distinct from both Tier 2 (verified local Ollama) and BYOK.
+
+### 3.5 Third-party hosted provider / BYOK — policy decision
+
 A remote AI provider operated by an external company. Only the minimum selected extracted text/chunks and prompt may be transmitted. The original PDF and password must never be sent. Requires explicit affirmative consent immediately before the first content-bearing request.
+
+For the BYOK route specifically, the approved policy direction is:
+
+- Direct browser → provider transmission is allowed where technically and policy compliant — BYOK does not require a DocFlow-controlled proxy/backend, and SEC-07 does not create one.
+- The API key is supplied and controlled by the user, not DocFlow.
+- The key must never be sent to DocFlow-controlled infrastructure merely for configuration or storage.
+- DocFlow must not log or persist the user's key by default.
+- Only minimized, permitted extracted text/context (and the user's prompt) may be sent to the BYOK provider — never the original PDF bytes, `File`, password, page images, thumbnails, or unrelated metadata (§1, §9).
+- The provider's own privacy/retention terms must be disclosed to the user as part of consent (§6).
+- The user must be made to understand that BYOK usage may incur charges from their chosen provider.
+
+Because the key is user-supplied and never handled by DocFlow, BYOK is a deliberate, narrow exception to the general "remote providers must be server-mediated" expectation in §9 — see the amended §9 wording below.
 
 ---
 
@@ -137,7 +172,7 @@ To be treated as mandatory acceptance criteria for `AI-01`/`AI-02` and subsequen
 
 **Browser processing** — extraction and chunking occur in the browser; enforce maximum chunk size/count; respect explicit selected-page scope; minimize text sent to providers.
 
-**Provider separation** — separate local and remote provider implementations. Remote providers must be server-mediated. A browser must never directly receive or contain a third-party provider secret.
+**Provider separation** — separate local and remote provider implementations. Third-party-hosted providers accessed via a DocFlow-controlled backend must be server-mediated, and a browser must never directly receive or contain a DocFlow-managed provider secret. **BYOK is a deliberate, narrow exception (§3.5):** the user supplies and controls their own provider key, and that key may be used directly from the browser to the provider without a DocFlow proxy — provided the §3.5 BYOK safeguards (key never sent to DocFlow infrastructure, not logged/persisted by DocFlow, only minimized text/prompt sent, provider terms disclosed) are met.
 
 **Remote provider safeguards** — provider-origin allowlist, model allowlist, strict request schema, authentication, rate limiting, content-free logging, no request-body persistence.
 
@@ -156,10 +191,10 @@ The developer-only NVIDIA Nemotron path (`ai_assistant.py`, `coding_agent.py`, `
 ## 11. Completion criteria this document satisfies
 
 1. Browser-only-PDF and text-egress rules — §1, §2.
-2. Local Ollama / self-hosted remote / third-party remote categories defined — §3.
+2. Browser AI (Tier 1) / local Ollama (Tier 2) / advanced providers incl. BYOK (Tier 3) / self-hosted remote / third-party remote categories defined — §3.
 3. Retention/logging defaults defined — §4.
 4. Remote-provider consent/disclosure requirements defined — §6, §7.
-5. Server-side remote-provider/key boundary mandated — §5.
+5. Server-side remote-provider/key boundary mandated, with the BYOK direct-browser exception explicitly scoped — §5, §3.5, §9.
 6. Prohibited fields and AI-01/AI-02 guardrails documented — §1, §9.
 
-This document does not itself implement any of the above — it is the policy Phase 5 code must be built and tested against.
+This document does not itself implement any of the above (beyond the AI-01/AI-02 foundation code in `services/ai/`, which contains no provider implementation) — it is the policy Phase 5 provider code must be built and tested against.
