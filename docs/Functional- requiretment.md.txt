@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDED IN PART (SEC-05, 2026-08-30):** FR-010 ("Temporary File Cleanup") describes server-side upload/retention/deletion that was never implemented and does not match the shipped architecture — PDFs are processed entirely client-side and are never uploaded, so there are no server-side temporary files to clean up. See `docs/DOCFLOW_STATUS.md` (Phase 4 / SEC-02, SEC-03, SEC-05) for current, code-verified ground truth. Kept below for historical context only.
+
 # 3. Functional Requirements
 
 ## Document Information

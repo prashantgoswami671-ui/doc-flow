@@ -517,6 +517,11 @@ export default function FixPageOrientationCard() {
           <p className="mt-1 text-sm text-gray-500">
             Text fixes are high-confidence. Image-only outliers require you to choose a rotation before applying.
           </p>
+          <p className="mt-2 text-xs text-gray-400">
+            Your PDF itself is never uploaded. For image-only pages, this
+            tool&rsquo;s OCR fallback may load OCR engine and language
+            files from a third-party CDN (jsDelivr) to detect orientation.
+          </p>
         </div>
 
         <UploadZone

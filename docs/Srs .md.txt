@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDED IN PART (SEC-05, 2026-08-30):** Section 1.4's "Automatically remove uploaded files after processing" describes a server-upload/temp-storage model that does not match the shipped architecture — PDFs are processed entirely client-side and are never uploaded, so there is nothing server-side to remove. See `docs/DOCFLOW_STATUS.md` (Phase 4 / SEC-02, SEC-03, SEC-05) for current, code-verified ground truth. Kept below for historical context only.
+
 # Software Requirements Specification (SRS)
 
 **Project Name:** DocFlow *(Working Title)*

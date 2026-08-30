@@ -220,6 +220,11 @@ export default function UnlockPdfCard() {
                   <EyeIcon visible={showPassword} />
                 </button>
               </div>
+              <p className="mt-2 text-xs text-gray-400">
+                DocFlow doesn&rsquo;t store the password you enter here
+                &mdash; it&rsquo;s used only in your browser to unlock this
+                PDF.
+              </p>
             </div>
           )}
 

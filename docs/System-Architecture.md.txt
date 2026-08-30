@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDED (SEC-05, 2026-08-30):** This document describes an early planning-stage architecture (Backend API + server-side Temporary File Storage) that was never built and does not reflect the shipped product. The actual, verified architecture is: all PDF processing runs client-side in the browser; there are no Next.js API routes, route handlers, or server actions that process PDFs; uploaded/generated PDF bytes are handled via browser File/ArrayBuffer/Blob/object URL APIs only. See `docs/DOCFLOW_STATUS.md` (Phase 4 / SEC-02, SEC-03, SEC-05) for current, code-verified ground truth. Kept below for historical context only — do not use this document as a source for privacy, security, or architecture claims.
+
 # 5. System Architecture
 
 ## 5.1 Overview

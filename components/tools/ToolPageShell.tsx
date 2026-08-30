@@ -66,6 +66,10 @@ export default function ToolPageShell({ tool, children }: ToolPageShellProps) {
         <p className="mt-2 text-sm text-gray-600 sm:text-base">
           {tool.description}
         </p>
+        <p className="mt-3 text-xs text-gray-400">
+          Your PDF is processed in your browser and is not uploaded to our
+          servers.
+        </p>
       </div>
 
       <div className="mt-10">{children}</div>
