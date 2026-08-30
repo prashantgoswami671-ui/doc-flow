@@ -120,7 +120,14 @@ Return ONLY valid JSON in this exact structure:
         print("=" * 70)
 
     def apply_proposal(self, proposal: dict) -> None:
-        """Show proposed diffs and write only after explicit approval."""
+        """Validate, diff, and (on approval) safely write a Nemotron proposal.
+
+        All validation happens before anything is shown or written. If any
+        change fails validation, the whole proposal is rejected and nothing
+        is written (all-or-nothing at validation time). Changes whose
+        proposed content is identical to the current file are treated as
+        no-ops and skipped rather than written.
+        """
 
         changes = proposal.get("changes", [])
 
@@ -128,13 +135,17 @@ Return ONLY valid JSON in this exact structure:
             print("\nNo code changes proposed.")
             return
 
-        # Validate proposal structure before showing an approval prompt.
+        validated_changes = []
+
+        # Validate proposal structure and filesystem safety before showing
+        # an approval prompt. A single failure rejects the whole proposal
+        # and nothing is written.
         for change in changes:
             file_path = change.get("file")
             content = change.get("content")
 
-            if not file_path:
-                print("\n❌ Proposal rejected: missing file path.")
+            if not file_path or not isinstance(file_path, str):
+                print("\n❌ Proposal rejected: missing or invalid file path.")
                 return
 
             if change.get("action") != "modify":
@@ -151,11 +162,44 @@ Return ONLY valid JSON in this exact structure:
                 )
                 return
 
+            # Read through the safe filesystem layer. This rejects path
+            # traversal, absolute paths, and files outside the repository
+            # with a clean message instead of a traceback, and rejects
+            # proposals that target nonexistent files (no arbitrary new
+            # file creation via this path, since action must be "modify").
+            try:
+                current_content = read_file(file_path)
+            except (ValueError, FileNotFoundError) as error:
+                print(f"\n❌ Proposal rejected for {file_path}: {error}")
+                return
+            except Exception as error:
+                print(
+                    f"\n❌ Proposal rejected: could not safely read "
+                    f"{file_path}: {error}"
+                )
+                return
+
+            if content == current_content:
+                print(f"\nℹ️  No actual content change for {file_path}; skipping.")
+                continue
+
+            validated_changes.append(
+                {
+                    "file": file_path,
+                    "content": content,
+                    "current_content": current_content,
+                }
+            )
+
+        if not validated_changes:
+            print("\nNo effective code changes after validation.")
+            return
+
         print("\n" + "=" * 70)
         print("PROPOSED CHANGES")
         print("=" * 70)
 
-        for change in changes:
+        for change in validated_changes:
             self.show_diff(
                 change["file"],
                 change["content"],
@@ -169,15 +213,43 @@ Return ONLY valid JSON in this exact structure:
             print("\n❌ Changes rejected. No files were modified.")
             return
 
-        for change in changes:
-            write_file(
-                change["file"],
-                change["content"],
+        applied = []
+        failures = []
+
+        for change in validated_changes:
+            try:
+                write_file(change["file"], change["content"])
+            except Exception as error:
+                failures.append((change["file"], f"write failed: {error}"))
+                continue
+
+            try:
+                written_content = read_file(change["file"])
+            except Exception as error:
+                failures.append((change["file"], f"verification read failed: {error}"))
+                continue
+
+            if written_content != change["content"]:
+                failures.append((change["file"], "verification mismatch"))
+                continue
+
+            applied.append(change["file"])
+            print(f"✅ Updated and verified {change['file']}")
+
+        if failures:
+            print("\n⚠️  Some changes did not verify correctly:")
+            for file_path, reason in failures:
+                print(f"   - {file_path}: {reason}")
+
+        if applied and not failures:
+            print("\n✅ All approved changes were applied and verified.")
+        elif applied:
+            print(
+                f"\n⚠️  {len(applied)} change(s) applied and verified; "
+                f"see failures above for the rest."
             )
-
-            print(f"✅ Updated {change['file']}")
-
-        print("\n✅ All approved changes were applied.")
+        else:
+            print("\n❌ No changes were successfully applied.")
 
 
 if __name__ == "__main__":

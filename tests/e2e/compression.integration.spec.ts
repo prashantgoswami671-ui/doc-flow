@@ -45,8 +45,15 @@ test.describe("Phase 3.3 — real rasterizer integration tests", () => {
 
     await expect(page.getByTestId("results")).toBeVisible();
     const resultsText = await page.getByTestId("results").textContent();
+    const parsed = JSON.parse(resultsText || "{}");
 
-    return JSON.parse(resultsText || "{}");
+    // Phase 3.5.2 baseline recording: print the real browser-generated
+    // result JSON so it can be transcribed into
+    // docs/PHASE_3_5_COMPRESSION_BASELINE.md. Does not affect assertions
+    // below, which still run against the same parsed object.
+    console.log(`[baseline:${testId}]`, JSON.stringify(parsed, null, 2));
+
+    return parsed;
   }
 
   test("TEST A — real rasterizer roundtrip produces a valid, correctly-sized PDF", async ({ page }) => {

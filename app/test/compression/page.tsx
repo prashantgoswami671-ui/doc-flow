@@ -79,7 +79,12 @@ export default function CompressionTestPage() {
 
     // Direct production-rasterizer call — real PDF.js + canvas + JPEG +
     // pdf-lib reconstruction, no compress.ts fallback wrapper involved.
+    // Timing wraps only this call, mirroring compressPDF's own
+    // start/end performance.now() measurement (services/pdf/compress.ts),
+    // so it reflects the real browser-side rasterization operation only.
+    const startTime = performance.now();
     const outputBytes = await rasterizePDF(file, "light");
+    const processingTime = performance.now() - startTime;
     const outputPdf = await PDFDocument.load(outputBytes); // throws if malformed
     const outputPageCount = outputPdf.getPageCount();
     const outputDims = outputPdf.getPages().map((p) => p.getSize());
@@ -88,6 +93,11 @@ export default function CompressionTestPage() {
       const out = outputDims[i];
       return Math.abs(d.width - out.width) < 1 && Math.abs(d.height - out.height) < 1;
     });
+
+    const reductionPercent =
+      sourceBytes.length === 0
+        ? 0
+        : ((sourceBytes.length - outputBytes.length) / sourceBytes.length) * 100;
 
     return {
       success: true,
@@ -100,6 +110,9 @@ export default function CompressionTestPage() {
       outputPageCount,
       originalSize: sourceBytes.length,
       processedSize: outputBytes.length,
+      mode: "light",
+      processingTime,
+      reductionPercent,
     };
   }
 
@@ -232,11 +245,15 @@ export default function CompressionTestPage() {
     return {
       success: true,
       pageCountPreserved: pageCount === 2,
+      pageCount,
       notLarger: result.processedSize <= result.originalSize,
       wasFallback,
       wasGenuineCompression: !wasFallback && result.processedSize < result.originalSize,
       originalSize: result.originalSize,
       processedSize: result.processedSize,
+      mode: result.mode,
+      processingTime: result.processingTime,
+      reductionPercent: result.reductionPercent,
     };
   }
 
@@ -251,12 +268,23 @@ export default function CompressionTestPage() {
     const outputPdf = await PDFDocument.load(result.bytes);
     const pageCount = outputPdf.getPageCount();
 
+    // Same byte-equality proof used by Test D/F/G — size alone can't
+    // distinguish a genuinely-compressed output from a fallback-to-
+    // original one, since both satisfy output <= original.
+    const wasFallback = bytesEqual(result.bytes, new Uint8Array(sourceBytes));
+
     return {
       success: true,
       pageCountPreserved: pageCount === 2,
+      pageCount,
       notLarger: result.processedSize <= result.originalSize,
+      wasFallback,
+      wasGenuineCompression: !wasFallback && result.processedSize < result.originalSize,
       originalSize: result.originalSize,
       processedSize: result.processedSize,
+      mode: result.mode,
+      processingTime: result.processingTime,
+      reductionPercent: result.reductionPercent,
     };
   }
 
@@ -276,6 +304,7 @@ export default function CompressionTestPage() {
     return {
       success: true,
       pageCountPreserved: pageCount === 3,
+      pageCount,
       notLarger: result.processedSize <= result.originalSize,
       // Expected true per the inspection report (rasterizing text/vector
       // content should make it larger, tripping compress.ts's
@@ -283,6 +312,9 @@ export default function CompressionTestPage() {
       wasFallback,
       originalSize: result.originalSize,
       processedSize: result.processedSize,
+      mode: result.mode,
+      processingTime: result.processingTime,
+      reductionPercent: result.reductionPercent,
     };
   }
 
@@ -306,12 +338,16 @@ export default function CompressionTestPage() {
     return {
       success: true,
       pageCountPreserved: pageCount === 2,
+      pageCount,
       customExecuted: !wasOriginalPassthrough,
       smallerThanOriginal: result.processedSize < result.originalSize,
       targetReached: result.processedSize <= targetBytes,
       originalSize: result.originalSize,
       processedSize: result.processedSize,
       targetBytes,
+      mode: result.mode,
+      processingTime: result.processingTime,
+      reductionPercent: result.reductionPercent,
     };
   }
 

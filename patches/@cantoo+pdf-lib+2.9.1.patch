@@ -1,0 +1,307 @@
+diff --git a/node_modules/@cantoo/pdf-lib/cjs/api/PDFDocument.js b/node_modules/@cantoo/pdf-lib/cjs/api/PDFDocument.js
+index fcdfe38..f3865ca 100644
+--- a/node_modules/@cantoo/pdf-lib/cjs/api/PDFDocument.js
++++ b/node_modules/@cantoo/pdf-lib/cjs/api/PDFDocument.js
+@@ -98,7 +98,15 @@ class PDFDocument {
+                 // Decrypt
+                 const fileIds = context.lookup(context.trailerInfo.ID, core_1.PDFArray);
+                 const encryptDict = context.lookup(context.trailerInfo.Encrypt, core_1.PDFDict);
+-                const decryptedContext = yield core_1.PDFParser.forBytesWithOptions(bytes, parseSpeed, throwOnInvalidObject, warnOnInvalidObjects, capNumbers, new crypto_1.CipherTransformFactory(encryptDict, fileIds.get(0).asBytes(), password), forIncrementalUpdate).parseDocument();
++                const encryptRef = context.trailerInfo.Encrypt;
++                const xrefRefs = [];
++                for (const [ref, obj] of context.enumerateIndirectObjects()) {
++                    if (obj instanceof core_1.PDFRawStream &&
++                        obj.dict.lookup(core_1.PDFName.of('Type')) === core_1.PDFName.of('XRef')) {
++                        xrefRefs.push(ref);
++                    }
++                }
++                const decryptedContext = yield core_1.PDFParser.forBytesWithOptions(bytes, parseSpeed, throwOnInvalidObject, warnOnInvalidObjects, capNumbers, new crypto_1.CipherTransformFactory(encryptDict, fileIds.get(0).asBytes(), password, encryptRef, xrefRefs), forIncrementalUpdate).parseDocument();
+                 const pdfDoc = new PDFDocument(decryptedContext, true, updateMetadata, preserveXFA);
+                 if (forIncrementalUpdate)
+                     pdfDoc.takeSnapshot();
+diff --git a/node_modules/@cantoo/pdf-lib/cjs/core/crypto.js b/node_modules/@cantoo/pdf-lib/cjs/core/crypto.js
+index e1c281f..380098d 100644
+--- a/node_modules/@cantoo/pdf-lib/cjs/core/crypto.js
++++ b/node_modules/@cantoo/pdf-lib/cjs/core/crypto.js
+@@ -1349,7 +1349,9 @@ class CipherTransform {
+ }
+ exports.CipherTransform = CipherTransform;
+ class CipherTransformFactory {
+-    constructor(dict, fileIdBytes, password) {
++    constructor(dict, fileIdBytes, password, encryptRef, xrefRefs) {
++        this.encryptRef = encryptRef;
++        this.xrefRefs = xrefRefs;
+         var _a, _b;
+         this.defaultPasswordBytes = new Uint8Array([
+             0x28, 0xbf, 0x4e, 0x5e, 0x4e, 0x75, 0x8a, 0x41, 0x64, 0x00, 0x4e, 0x56,
+diff --git a/node_modules/@cantoo/pdf-lib/cjs/core/parser/PDFObjectParser.js b/node_modules/@cantoo/pdf-lib/cjs/core/parser/PDFObjectParser.js
+index 1128a45..0da3713 100644
+--- a/node_modules/@cantoo/pdf-lib/cjs/core/parser/PDFObjectParser.js
++++ b/node_modules/@cantoo/pdf-lib/cjs/core/parser/PDFObjectParser.js
+@@ -78,7 +78,9 @@ class PDFObjectParser extends BaseParser_1.default {
+             value += (0, utils_1.charFromCode)(this.bytes.next());
+         }
+         this.bytes.assertNext(CharCodes_1.default.GreaterThan);
+-        if (this.cryptoFactory && ref) {
++        const isEncryptMetadata = this.cryptoFactory && this.cryptoFactory.encryptRef && ref && ref.objectNumber === this.cryptoFactory.encryptRef.objectNumber;
++        const isXRef = this.cryptoFactory && this.cryptoFactory.xrefRefs && ref && this.cryptoFactory.xrefRefs.some((r) => r.objectNumber === ref.objectNumber);
++        if (this.cryptoFactory && ref && !isEncryptMetadata && !isXRef) {
+             const transformer = this.cryptoFactory.createCipherTransform(ref.objectNumber, ref.generationNumber);
+             const arr = transformer.decryptBytes(PDFHexString_1.default.of(value).asBytes());
+             value = arr.reduce((str, byte) => str + byte.toString(16).padStart(2, '0'), '');
+@@ -109,7 +111,9 @@ class PDFObjectParser extends BaseParser_1.default {
+             // Once (if) the unescaped parenthesis balance out, return their contents
+             if (nestingLvl === 0) {
+                 let actualValue = value.substring(1, value.length - 1);
+-                if (this.cryptoFactory && ref) {
++                const isEncryptMetadata = this.cryptoFactory && this.cryptoFactory.encryptRef && ref && ref.objectNumber === this.cryptoFactory.encryptRef.objectNumber;
++                const isXRef = this.cryptoFactory && this.cryptoFactory.xrefRefs && ref && this.cryptoFactory.xrefRefs.some((r) => r.objectNumber === ref.objectNumber);
++                if (this.cryptoFactory && ref && !isEncryptMetadata && !isXRef) {
+                     const transformer = this.cryptoFactory.createCipherTransform(ref.objectNumber, ref.generationNumber);
+                     const decrypted = transformer.decryptBytes(PDFString_1.default.of(actualValue).asBytes());
+                     actualValue = (0, utils_1.arrayAsString)(decrypted);
+@@ -203,7 +207,18 @@ class PDFObjectParser extends BaseParser_1.default {
+             end = this.findEndOfStreamFallback(startPos);
+         }
+         let contents = this.bytes.slice(start, end);
+-        if (this.cryptoFactory && ref) {
++        // Cross-reference streams are structural data and must never be treated
++        // as encrypted content: a reader has to parse the XRef stream (to find
++        // /Encrypt and the other trailer info) before it can even derive the
++        // decryption key, so the writer never encrypts it. Without this guard,
++        // parseDictOrStream() decrypts the already-plaintext XRef stream bytes,
++        // corrupting them, and (via downstream effects on the saved output)
++        // leaves a stale /Encrypt reference in re-saved documents.
++        // patch-package: @cantoo+pdf-lib+2.9.1 (SEC-04 unlock XRef-stream fix)
++        const isXRefStream = dict.get(PDFName_1.default.of('Type')) === PDFName_1.default.of('XRef');
++        const isEncryptMetadata = this.cryptoFactory && this.cryptoFactory.encryptRef && ref && ref.objectNumber === this.cryptoFactory.encryptRef.objectNumber;
++        const isXRef = isXRefStream || (this.cryptoFactory && this.cryptoFactory.xrefRefs && ref && this.cryptoFactory.xrefRefs.some((r) => r.objectNumber === ref.objectNumber));
++        if (this.cryptoFactory && ref && !isEncryptMetadata && !isXRef) {
+             const transform = this.cryptoFactory.createCipherTransform(ref.objectNumber, ref.generationNumber);
+             contents = transform.decryptBytes(contents);
+         }
+diff --git a/node_modules/@cantoo/pdf-lib/es/core/crypto.js b/node_modules/@cantoo/pdf-lib/es/core/crypto.js
+index 0e82283..7e5a252 100644
+--- a/node_modules/@cantoo/pdf-lib/es/core/crypto.js
++++ b/node_modules/@cantoo/pdf-lib/es/core/crypto.js
+@@ -1334,7 +1334,9 @@ class CipherTransform {
+     }
+ }
+ class CipherTransformFactory {
+-    constructor(dict, fileIdBytes, password) {
++    constructor(dict, fileIdBytes, password, encryptRef, xrefRefs) {
++        this.encryptRef = encryptRef;
++        this.xrefRefs = xrefRefs;
+         var _a, _b;
+         this.defaultPasswordBytes = new Uint8Array([
+             0x28, 0xbf, 0x4e, 0x5e, 0x4e, 0x75, 0x8a, 0x41, 0x64, 0x00, 0x4e, 0x56,
+diff --git a/node_modules/@cantoo/pdf-lib/es/core/parser/PDFObjectParser.js b/node_modules/@cantoo/pdf-lib/es/core/parser/PDFObjectParser.js
+index 2818a5b..8b70cbe 100644
+--- a/node_modules/@cantoo/pdf-lib/es/core/parser/PDFObjectParser.js
++++ b/node_modules/@cantoo/pdf-lib/es/core/parser/PDFObjectParser.js
+@@ -69,13 +69,23 @@ class PDFObjectParser extends BaseParser {
+         return PDFNumber.of(firstNum);
+     }
+     parseHexString(ref) {
++        var _a, _b;
+         let value = '';
+         this.bytes.assertNext(CharCodes.LessThan);
+         while (!this.bytes.done() && this.bytes.peek() !== CharCodes.GreaterThan) {
+             value += charFromCode(this.bytes.next());
+         }
+         this.bytes.assertNext(CharCodes.GreaterThan);
+-        if (this.cryptoFactory && ref) {
++        const isEncryptMetadata =
++            ((_a = this.cryptoFactory) === null || _a === void 0 ? void 0 : _a.encryptRef) &&
++                ref &&
++                ref.objectNumber === this.cryptoFactory.encryptRef.objectNumber;
++        const isXRef =
++            ((_b = this.cryptoFactory) === null || _b === void 0 ? void 0 : _b.xrefRefs) &&
++                ref &&
++                this.cryptoFactory.xrefRefs.some((r) => r.objectNumber === ref.objectNumber);
++
++        if (this.cryptoFactory && ref && !isEncryptMetadata && !isXRef) {
+             const transformer = this.cryptoFactory.createCipherTransform(ref.objectNumber, ref.generationNumber);
+             const arr = transformer.decryptBytes(PDFHexString.of(value).asBytes());
+             value = arr.reduce((str, byte) => str + byte.toString(16).padStart(2, '0'), '');
+@@ -83,6 +93,7 @@ class PDFObjectParser extends BaseParser {
+         return PDFHexString.of(value);
+     }
+     parseString(ref) {
++        var _a, _b;
+         let nestingLvl = 0;
+         let isEscaped = false;
+         let value = '';
+@@ -106,7 +117,15 @@ class PDFObjectParser extends BaseParser {
+             // Once (if) the unescaped parenthesis balance out, return their contents
+             if (nestingLvl === 0) {
+                 let actualValue = value.substring(1, value.length - 1);
+-                if (this.cryptoFactory && ref) {
++                const isEncryptMetadata =
++                    ((_a = this.cryptoFactory) === null || _a === void 0 ? void 0 : _a.encryptRef) &&
++                        ref &&
++                        ref.objectNumber === this.cryptoFactory.encryptRef.objectNumber;
++                const isXRef =
++                    ((_b = this.cryptoFactory) === null || _b === void 0 ? void 0 : _b.xrefRefs) &&
++                        ref &&
++                        this.cryptoFactory.xrefRefs.some((r) => r.objectNumber === ref.objectNumber);
++                if (this.cryptoFactory && ref && !isEncryptMetadata && !isXRef) {
+                     const transformer = this.cryptoFactory.createCipherTransform(ref.objectNumber, ref.generationNumber);
+                     const decrypted = transformer.decryptBytes(PDFString.of(actualValue).asBytes());
+                     actualValue = arrayAsString(decrypted);
+@@ -174,6 +193,7 @@ class PDFObjectParser extends BaseParser {
+         }
+     }
+     parseDictOrStream(ref) {
++        var _c, _d;
+         const startPos = this.bytes.position();
+         const dict = this.parseDict(ref);
+         this.skipWhitespaceAndComments();
+@@ -200,7 +220,17 @@ class PDFObjectParser extends BaseParser {
+             end = this.findEndOfStreamFallback(startPos);
+         }
+         let contents = this.bytes.slice(start, end);
+-        if (this.cryptoFactory && ref) {
++        const isXRefStream = dict.get(PDFName.of('Type')) === PDFName.of('XRef');
++        const isEncryptMetadata =
++            ((_c = this.cryptoFactory) === null || _c === void 0 ? void 0 : _c.encryptRef) &&
++                ref &&
++                ref.objectNumber === this.cryptoFactory.encryptRef.objectNumber;
++        const isXRef =
++            isXRefStream ||
++                (((_d = this.cryptoFactory) === null || _d === void 0 ? void 0 : _d.xrefRefs) &&
++                    ref &&
++                    this.cryptoFactory.xrefRefs.some((r) => r.objectNumber === ref.objectNumber));
++        if (this.cryptoFactory && ref && !isEncryptMetadata && !isXRef) {
+             const transform = this.cryptoFactory.createCipherTransform(ref.objectNumber, ref.generationNumber);
+             contents = transform.decryptBytes(contents);
+         }
+diff --git a/node_modules/@cantoo/pdf-lib/src/api/PDFDocument.ts b/node_modules/@cantoo/pdf-lib/src/api/PDFDocument.ts
+index ff6e1d7..2890195 100644
+--- a/node_modules/@cantoo/pdf-lib/src/api/PDFDocument.ts
++++ b/node_modules/@cantoo/pdf-lib/src/api/PDFDocument.ts
+@@ -222,6 +222,16 @@ export default class PDFDocument {
+       // Decrypt
+       const fileIds = context.lookup(context.trailerInfo.ID, PDFArray);
+       const encryptDict = context.lookup(context.trailerInfo.Encrypt, PDFDict);
++      const encryptRef = context.trailerInfo.Encrypt as PDFRef;
++      const xrefRefs: PDFRef[] = [];
++      for (const [ref, obj] of context.enumerateIndirectObjects()) {
++        if (
++          obj instanceof PDFRawStream &&
++          obj.dict.lookup(PDFName.of('Type')) === PDFName.of('XRef')
++        ) {
++          xrefRefs.push(ref);
++        }
++      }
+       const decryptedContext = await PDFParser.forBytesWithOptions(
+         bytes,
+         parseSpeed,
+@@ -232,6 +242,8 @@ export default class PDFDocument {
+           encryptDict,
+           (fileIds.get(0) as PDFHexString).asBytes(),
+           password,
++          encryptRef,
++          xrefRefs,
+         ),
+         forIncrementalUpdate,
+       ).parseDocument();
+diff --git a/node_modules/@cantoo/pdf-lib/src/core/crypto.ts b/node_modules/@cantoo/pdf-lib/src/core/crypto.ts
+index ef6f43d..1232da1 100644
+--- a/node_modules/@cantoo/pdf-lib/src/core/crypto.ts
++++ b/node_modules/@cantoo/pdf-lib/src/core/crypto.ts
+@@ -1599,6 +1599,8 @@ class CipherTransformFactory {
+   stmf!: PDFName;
+   strf!: PDFName;
+   eff!: PDFName;
++  encryptRef?: PDFRef;
++  xrefRefs?: PDFRef[];
+ 
+   private defaultPasswordBytes = new Uint8Array([
+     0x28, 0xbf, 0x4e, 0x5e, 0x4e, 0x75, 0x8a, 0x41, 0x64, 0x00, 0x4e, 0x56,
+@@ -1607,7 +1609,15 @@ class CipherTransformFactory {
+   ]);
+   private identityName = PDFName.of('Identity');
+ 
+-  constructor(dict: PDFDict, fileIdBytes: Uint8Array, password?: string) {
++  constructor(
++    dict: PDFDict,
++    fileIdBytes: Uint8Array,
++    password?: string,
++    encryptRef?: PDFRef,
++    xrefRefs?: PDFRef[],
++  ) {
++    this.encryptRef = encryptRef;
++    this.xrefRefs = xrefRefs;
+     const filter = dict.get(PDFName.of('Filter')) as PDFName;
+     if (filter.asString() !== '/Standard') {
+       throw new Error('unknown encryption method');
+diff --git a/node_modules/@cantoo/pdf-lib/src/core/parser/PDFObjectParser.ts b/node_modules/@cantoo/pdf-lib/src/core/parser/PDFObjectParser.ts
+index 176796f..2264b44 100644
+--- a/node_modules/@cantoo/pdf-lib/src/core/parser/PDFObjectParser.ts
++++ b/node_modules/@cantoo/pdf-lib/src/core/parser/PDFObjectParser.ts
+@@ -110,7 +110,16 @@ class PDFObjectParser extends BaseParser {
+     }
+     this.bytes.assertNext(CharCodes.GreaterThan);
+ 
+-    if (this.cryptoFactory && ref) {
++    const isEncryptMetadata =
++      this.cryptoFactory?.encryptRef &&
++      ref &&
++      ref.objectNumber === this.cryptoFactory.encryptRef.objectNumber;
++    const isXRef =
++      this.cryptoFactory?.xrefRefs &&
++      ref &&
++      this.cryptoFactory.xrefRefs.some((r) => r.objectNumber === ref.objectNumber);
++
++    if (this.cryptoFactory && ref && !isEncryptMetadata && !isXRef) {
+       const transformer = this.cryptoFactory.createCipherTransform(
+         ref.objectNumber,
+         ref.generationNumber,
+@@ -151,7 +160,16 @@ class PDFObjectParser extends BaseParser {
+       if (nestingLvl === 0) {
+         let actualValue = value.substring(1, value.length - 1);
+ 
+-        if (this.cryptoFactory && ref) {
++        const isEncryptMetadata =
++          this.cryptoFactory?.encryptRef &&
++          ref &&
++          ref.objectNumber === this.cryptoFactory.encryptRef.objectNumber;
++        const isXRef =
++          this.cryptoFactory?.xrefRefs &&
++          ref &&
++          this.cryptoFactory.xrefRefs.some((r) => r.objectNumber === ref.objectNumber);
++
++        if (this.cryptoFactory && ref && !isEncryptMetadata && !isXRef) {
+           const transformer = this.cryptoFactory.createCipherTransform(
+             ref.objectNumber,
+             ref.generationNumber,
+@@ -269,7 +287,27 @@ class PDFObjectParser extends BaseParser {
+ 
+     let contents = this.bytes.slice(start, end);
+ 
+-    if (this.cryptoFactory && ref) {
++    // Cross-reference streams are structural data and must never be treated
++    // as encrypted content: a reader has to parse the XRef stream (to find
++    // /Encrypt and the other trailer info) before it can even derive the
++    // decryption key, so the writer never encrypts it. Without this guard,
++    // parseDictOrStream() decrypts the already-plaintext XRef stream bytes,
++    // corrupting them, and (via downstream effects on the saved output)
++    // leaves a stale /Encrypt reference in re-saved documents.
++    // patch-package: @cantoo+pdf-lib+2.9.1 (SEC-04 unlock XRef-stream fix)
++    const isXRefStream =
++      dict.get(PDFName.of('Type')) === PDFName.of('XRef');
++    const isEncryptMetadata =
++      this.cryptoFactory?.encryptRef &&
++      ref &&
++      ref.objectNumber === this.cryptoFactory.encryptRef.objectNumber;
++    const isXRef =
++      isXRefStream ||
++      (this.cryptoFactory?.xrefRefs &&
++        ref &&
++        this.cryptoFactory.xrefRefs.some((r) => r.objectNumber === ref.objectNumber));
++
++    if (this.cryptoFactory && ref && !isEncryptMetadata && !isXRef) {
+       const transform = this.cryptoFactory.createCipherTransform(
+         ref.objectNumber,
+         ref.generationNumber,

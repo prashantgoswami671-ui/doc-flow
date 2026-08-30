@@ -19,7 +19,7 @@ export function getSettings(mode: RasterCompressionMode): RasterSettings {
   }
 
   // Validated Light settings (Phase 3.5 baseline):
-  // scale 2.2 + JPEG quality 0.92 produced a 31.3% reduction on the real
+  // scale 2.2 + JPEG quality 0.92 produced a 33.0% reduction on the real
   // ~27 MB test PDF while remaining clear and readable. Scale controls
   // rasterization resolution only; pageViewport below keeps the output
   // PDF's physical page dimensions unchanged.
@@ -145,7 +145,7 @@ export async function rasterizePDF(
 export async function rasterizePDFWithSettings(
   file: File,
   settings: RasterSettings,
-  releaseResources = false,
+  releaseResources = true,
 ): Promise<Uint8Array> {
   // Import PDF.js only in the browser.
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");

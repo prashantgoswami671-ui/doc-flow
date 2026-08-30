@@ -281,6 +281,11 @@ export default function ProtectPdfCard() {
                 </div>
               </div>
 
+              <p className="text-xs text-gray-400">
+                There&rsquo;s no way to recover a forgotten password &mdash;
+                DocFlow doesn&rsquo;t store it.
+              </p>
+
               {validationError && (
                 <p className="text-sm font-medium text-red-600">
                   {validationError}
