@@ -33,6 +33,35 @@ import { join, relative, extname } from "node:path";
  *   (allowed request shape, Ollama URL allowlisting, consent-gating, etc.)
  *   from docs/SEC-06-AI-DATA-POLICY.md — those require AI-01/AI-02 to
  *   exist first and are out of scope for this guard.
+ *
+ * Checkpoint 2A (Browser AI prototype) investigation note, added
+ * 2026-08-31 — findings per checkpoint spec §16 before any test change:
+ *   1. The prototype's own source (services/ai-prototype/*) contains no
+ *      literal fetch()/XMLHttpRequest/sendBeacon/WebSocket/FormData call
+ *      — model-asset downloads are performed internally by the
+ *      `@huggingface/transformers` package (a node_modules dependency),
+ *      not by any DocFlow-authored file under app/components/services/lib.
+ *   2. Their destination is the model repo configured by
+ *      services/ai-prototype/constants.ts (PILOT_MODEL_ID /
+ *      BENCHMARK_CANDIDATE_MODEL_ID) via the Hugging Face Hub/CDN — a
+ *      fixed, known static-asset source, not an arbitrary/user-supplied
+ *      destination.
+ *   3. The request bodies are plain GET asset fetches for model weight
+ *      files; no document-derived content (extracted text, chunks, the
+ *      original PDF, or any AI request payload) is attached to them —
+ *      services/ai-prototype/browserAiWorker.ts only ever sends the
+ *      plain-text chat messages built by promptBuilder.ts *to the model
+ *      itself* (in-process inference calls, not network requests).
+ *   4. Conclusion: this mirrors the already-accepted tesseract.js/jsDelivr
+ *      precedent (SEC-05) — a disclosed, third-party dependency's own
+ *      internal asset-fetching behavior, out of this guard's scope by
+ *      design (see "It intentionally does not inspect node_modules"
+ *      above). No amendment to SCAN_ROOT_DIRS, ALLOWED_FETCH_FILES, or
+ *      the assertions below was needed or made: this guard would still
+ *      correctly fail if a future change added a literal fetch() call
+ *      inside services/ai-prototype/* itself (e.g. a hand-rolled
+ *      download/proxy layer), which is exactly the case that would
+ *      warrant SEC-06 review.
  */
 
 const SCAN_ROOT_DIRS = ["app", "components", "services", "lib"];

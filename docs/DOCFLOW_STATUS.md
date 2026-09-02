@@ -80,6 +80,22 @@ Last reconciled: 2026-08-31 (SEC-07 + AI-01/AI-02 Checkpoint 1), against direct 
 |---|---|---|
 | AI-01 | Capability-based AI provider/runtime abstraction (contract only — supports Browser AI/Ollama/BYOK/future Cloud AI without redesign; no provider implemented) | ✅ **Checkpoint 1 done.** `services/ai/types.ts` defines `AiRuntime`/`AiCapabilities`/`AiTextGenerationRequest` (capability-based, not tier-based); prohibited fields (`file`, `blob`, `fileBytes`, `arrayBuffer`, `password`, `pageImage`, `thumbnail`, `metadata`) are typed `never` and additionally rejected at runtime by `services/ai/validation.ts` (`assertValidAiTextGenerationRequest`, `assertValidAiCapabilities`, `containsDisallowedBinaryPayload` deep scan). No provider (Browser AI/Ollama/BYOK/Cloud), no fetch, no Ollama/API-key/model-download logic exists — contract/foundation only, per SEC-06 §9. Tests: `services/ai/validation.test.ts`. |
 | AI-02 | Text extraction → bounded, page-aware chunking pipeline for AI input (browser-side; calls no AI provider) | ✅ **Checkpoint 1 done.** `services/ai/extraction.ts` extracts page-aware plain text via PDF.js `getTextContent()` (separate from `services/pdf/extract.ts`, which only copies pages — no text-extraction logic existed there to reuse); `services/ai/chunking.ts` produces bounded `AiContextChunk`s (`MAX_CHUNK_CHARACTERS`/`MAX_CHUNKS_PER_REQUEST`/`MAX_TOTAL_CONTEXT_CHARACTERS` in `services/ai/constants.ts`); `services/ai/pipeline.ts` (`buildAiTextContext`) wires both together end-to-end. Supports explicit page scope (all/selected/subset). Scanned/image-only pages report `hasExtractableText: false` with no OCR invoked and no fabricated content. No network call anywhere in `services/ai/`. Tests: `services/ai/extraction.test.ts`, `services/ai/chunking.test.ts`, `services/ai/pipeline.test.ts`, reusing existing fixtures from `services/pdf/__fixtures__`. **Verification not independently run by the implementing agent** (no shell/execution access to this repo in that session) — `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `npm test` (incl. `tests/network-egress.test.ts`) still need to be run and their results recorded here before Checkpoint 1 is considered verified. |
+
+### Browser AI prototype / Checkpoint 2A benchmark finding
+
+A controlled Map→Reduce benchmark of the Browser AI (WASM) prototype was run against a synthetic 41-page fixture:
+
+- Map→Reduce prototype successfully processed the controlled 41-page fixture using batch=6.
+- 7 Map + 1 Reduce = 8 generations.
+- Controlled total: ~29.5 minutes.
+- Batch=3 comparison: ~42.4 minutes / 15 generations.
+- Conclusion: Map→Reduce is technically viable for bounded-context scaling, but current WASM latency/variability is not production-ready.
+- Full data and analysis: `docs/AI_BROWSER_PROTOTYPE_BENCHMARK.md`.
+
+This is prototype evidence only. It does not change the production AI-02 implementation or its constants, and does not mark any new AI task complete beyond what is already recorded above.
+
+| ID | Task | Status |
+|---|---|---|
 | AI-03 | Generic prompt-box UI (single screen, preset buttons prefill the box) | ⚪ Not started |
 | AI-04 | Preset: Summarize | ⚪ Not started — prompt template only, on top of AI-01–03 |
 | AI-05 | Preset: Translate (text-first, not layout-preserving) | ⚪ Not started |
