@@ -19,7 +19,8 @@ export type ToolCategory =
   | "create"
   | "convert"
   | "enhance"
-  | "protect";
+  | "protect"
+  | "ai";
 
 export type ToolEntry = {
   /** Unique URL segment: the tool lives at /tools/{slug}. */
@@ -37,6 +38,7 @@ export const TOOL_CATEGORY_LABELS: Record<ToolCategory, string> = {
   convert: "Convert",
   enhance: "Enhance",
   protect: "Protect",
+  ai: "AI",
 };
 
 export const TOOL_CATEGORY_DESCRIPTIONS: Record<ToolCategory, string> = {
@@ -47,6 +49,7 @@ export const TOOL_CATEGORY_DESCRIPTIONS: Record<ToolCategory, string> = {
   enhance:
     "Improve document quality. Compress, repair, validate, fix orientation, and add finishing touches.",
   protect: "Control document access. Password-protect and unlock PDFs.",
+  ai: "Understand your document. Summarize PDFs locally in your browser.",
 };
 
 /** Display order for categories across the homepage and navigation. */
@@ -56,6 +59,7 @@ export const TOOL_CATEGORY_ORDER: ToolCategory[] = [
   "convert",
   "enhance",
   "protect",
+  "ai",
 ];
 
 export const TOOL_CATALOG: ToolEntry[] = [
@@ -144,6 +148,12 @@ export const TOOL_CATALOG: ToolEntry[] = [
     name: "Unlock PDF",
     description: "Remove password protection from a PDF using its password.",
     category: "protect",
+  },
+  {
+    slug: "summarize-pdf",
+    name: "Summarize PDF",
+    description: "Get a concise summary of your PDF — processed locally in your browser.",
+    category: "ai",
   },
 ];
 
