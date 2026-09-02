@@ -33,6 +33,7 @@ import {
   AiGenerationCancelledError,
   AiGenerationError,
   AiModelInitializationError,
+  AiRuntimeDisposedError,
   AiRuntimeUnavailableError,
 } from "./errors";
 import type {
@@ -46,6 +47,7 @@ export {
   AiGenerationCancelledError,
   AiGenerationError,
   AiModelInitializationError,
+  AiRuntimeDisposedError,
   AiRuntimeUnavailableError,
 } from "./errors";
 
@@ -70,6 +72,18 @@ export interface BrowserAiRuntimeOptions {
   workerFactory?: () => Worker;
   availabilityCheck?: () => Promise<AiAvailability>;
   selectDevice?: () => Promise<AiWorkerDevice>;
+}
+
+/**
+ * Browser-provider-specific result shape. `contextTruncated` is a
+ * provider-local fact (Ollama/BYOK/Cloud have entirely different context
+ * mechanics) so it is declared here rather than widening the shared
+ * `AiTextGenerationResult` contract in `services/ai/types.ts`. The
+ * covariant return type is legal against the `AiRuntime` interface.
+ */
+export interface BrowserAiTextGenerationResult extends AiTextGenerationResult {
+  /** True when one or more supplied context chunks were dropped to stay within `BROWSER_AI_MAX_CONTEXT_CHARACTERS`. */
+  contextTruncated: boolean;
 }
 
 export const BROWSER_AI_CAPABILITIES: AiCapabilities = {
@@ -126,6 +140,33 @@ export async function selectBrowserAiDevice(
   }
 }
 
+/**
+ * Deterministically bounds document context to `maxCharacters`, measured
+ * as the sum of each chunk's `text.length`. Iterates in the order given
+ * (the caller's existing chunk order — never re-sorted or reordered) and
+ * keeps a chunk only if adding it whole still fits. Stops at the first
+ * chunk that would overflow rather than skipping it and continuing, and
+ * never slices an individual chunk's `text`. Does not mutate `chunks`.
+ */
+export function boundContextChunks(
+  chunks: AiContextChunk[],
+  maxCharacters: number,
+): { chunks: AiContextChunk[]; truncated: boolean } {
+  const kept: AiContextChunk[] = [];
+  let total = 0;
+
+  for (const chunk of chunks) {
+    const nextTotal = total + chunk.text.length;
+    if (nextTotal > maxCharacters) {
+      return { chunks: kept, truncated: true };
+    }
+    kept.push(chunk);
+    total = nextTotal;
+  }
+
+  return { chunks: kept, truncated: false };
+}
+
 function renderDocumentContextBlock(chunks: AiContextChunk[]): string {
   const body = chunks
     .slice()
@@ -178,8 +219,26 @@ export class BrowserAiRuntime implements AiRuntime {
   private inFlight = false;
   private currentRequestId: string | null = null;
   private cancelRequested = false;
+
+  /**
+   * Identifies the current worker/init lifecycle. Bumped every time a new
+   * worker is created (`ensureInitialized`) or the runtime is torn down
+   * (`dispose`). Callbacks captured by an older worker (postMessage
+   * closures, onmessage/onerror) compare against this before acting, so a
+   * stale/disposed worker's late events can never settle a newer
+   * operation — this is defense-in-depth on top of nulling out the old
+   * worker's handlers in `discardWorker`.
+   */
+  private workerToken = 0;
+
+  private pendingInit: {
+    token: number;
+    reject: (error: Error) => void;
+  } | null = null;
+
   private pendingGenerate: {
     requestId: string;
+    token: number;
     resolve: (text: string) => void;
     reject: (error: Error) => void;
   } | null = null;
@@ -213,15 +272,39 @@ export class BrowserAiRuntime implements AiRuntime {
     }
   }
 
-  /** Tears down the Worker. A later `generateText()` will re-initialize. */
+  /**
+   * Tears down the Worker and settles any pending operation so a caller
+   * awaiting `generateText()` never hangs. Rejects a pending init or
+   * generation with `AiRuntimeDisposedError` (distinct from an explicit
+   * `cancel()`), then discards the worker. The runtime remains reusable —
+   * a later `generateText()` creates and initializes a fresh Worker.
+   */
   dispose(): void {
-    this.worker?.terminate();
+    // Invalidate the current lifecycle first so any in-flight async
+    // continuation (e.g. a `selectDevice()` still resolving) that checks
+    // `workerToken` against its captured value becomes a no-op instead of
+    // acting on state this call is about to tear down.
+    this.workerToken += 1;
+
+    const pendingInit = this.pendingInit;
+    this.pendingInit = null;
+    pendingInit?.reject(new AiRuntimeDisposedError());
+
+    const pendingGenerate = this.pendingGenerate;
+    this.pendingGenerate = null;
+    pendingGenerate?.reject(new AiRuntimeDisposedError());
+
+    if (this.worker) {
+      this.discardWorker(this.worker);
+    }
     this.worker = null;
     this.modelReady = false;
     this.currentRequestId = null;
   }
 
-  async generateText(request: AiTextGenerationRequest): Promise<AiTextGenerationResult> {
+  async generateText(
+    request: AiTextGenerationRequest,
+  ): Promise<BrowserAiTextGenerationResult> {
     assertValidAiTextGenerationRequest(request);
 
     if (this.inFlight) {
@@ -251,7 +334,11 @@ export class BrowserAiRuntime implements AiRuntime {
         throw new AiGenerationCancelledError();
       }
 
-      const messages = buildBrowserAiMessages(request.prompt, request.contextChunks);
+      const { chunks: boundedChunks, truncated: contextTruncated } = boundContextChunks(
+        request.contextChunks ?? [],
+        BROWSER_AI_MAX_CONTEXT_CHARACTERS,
+      );
+      const messages = buildBrowserAiMessages(request.prompt, boundedChunks);
       const maxNewTokens = resolveMaxNewTokens(request.settings?.maxOutputTokens);
 
       const text = await this.runGenerate(requestId, messages, maxNewTokens);
@@ -260,12 +347,29 @@ export class BrowserAiRuntime implements AiRuntime {
         text,
         providerId: this.capabilities.providerId,
         runtime: this.capabilities.runtime,
+        contextTruncated,
       };
     } finally {
       this.inFlight = false;
       this.currentRequestId = null;
       this.cancelRequested = false;
     }
+  }
+
+  /** Nulls out a worker's handlers before terminating it, so any message it was already about to dispatch (e.g. a queued microtask in tests) cannot reach a stale callback after this runtime has moved on. */
+  private discardWorker(worker: Worker): void {
+    worker.onmessage = null;
+    worker.onerror = null;
+    try {
+      worker.terminate();
+    } catch {
+      // Best-effort teardown — a worker that fails to terminate cleanly
+      // must not prevent the runtime from becoming reusable.
+    }
+    if (this.worker === worker) {
+      this.worker = null;
+    }
+    this.modelReady = false;
   }
 
   private ensureInitialized(): Promise<void> {
@@ -276,68 +380,135 @@ export class BrowserAiRuntime implements AiRuntime {
     const worker = this.workerFactory();
     this.worker = worker;
     this.modelReady = false;
+    this.workerToken += 1;
+    const token = this.workerToken;
 
     return new Promise<void>((resolve, reject) => {
-      const fail = (error: Error) => {
-        this.dispose();
+      let settled = false;
+
+      const settleReject = (error: Error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.pendingInit = null;
+        if (this.workerToken === token) {
+          this.discardWorker(worker);
+        }
         reject(error);
       };
 
+      const settleResolve = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.pendingInit = null;
+        resolve();
+      };
+
+      this.pendingInit = { token, reject: settleReject };
+
       worker.onmessage = (event: MessageEvent<AiWorkerResponse>) => {
+        if (this.workerToken !== token) {
+          return; // Stale worker (superseded by dispose()/re-init) — ignore.
+        }
+
         const message = event.data;
 
         if (message.type === "ready") {
           this.modelReady = true;
           worker.onmessage = this.onWorkerMessage;
-          resolve();
+          settleResolve();
           return;
         }
 
         if (message.type === "error" && message.duringInit) {
-          fail(new AiModelInitializationError(message.message));
+          settleReject(new AiModelInitializationError(message.message));
         }
       };
 
       worker.onerror = (event: ErrorEvent) => {
+        if (this.workerToken !== token) {
+          return; // Stale worker — already discarded/replaced.
+        }
+
         if (this.modelReady) {
-          this.pendingGenerate?.reject(
-            new AiGenerationError(
-              event.message || "Browser AI worker failed during generation.",
-            ),
-          );
-          this.pendingGenerate = null;
+          // Thread-level crash after init completed: this worker is no
+          // longer trustworthy for anything, not just the current call —
+          // discard it so the next generateText() is forced to
+          // re-initialize a fresh one rather than reusing a dead thread.
+          this.handleWorkerThreadError(event);
           return;
         }
 
-        fail(
+        settleReject(
           new AiModelInitializationError(
             event.message || "Browser AI worker failed during initialization.",
           ),
         );
       };
 
-      void this.selectDevice().then((device) => {
-        if (this.cancelRequested) {
-          fail(new AiGenerationCancelledError());
-          return;
-        }
+      this.selectDevice()
+        .then((device) => {
+          if (this.workerToken !== token) {
+            return; // Disposed/superseded while selectDevice() was pending.
+          }
 
-        worker.postMessage({
-          type: "init",
-          device,
-          modelId: BROWSER_AI_MODEL_ID,
-          dtype: BROWSER_AI_MODEL_DTYPE,
+          if (this.cancelRequested) {
+            settleReject(new AiGenerationCancelledError());
+            return;
+          }
+
+          worker.postMessage({
+            type: "init",
+            device,
+            modelId: BROWSER_AI_MODEL_ID,
+            dtype: BROWSER_AI_MODEL_DTYPE,
+          });
+        })
+        .catch((error: unknown) => {
+          if (this.workerToken !== token) {
+            return;
+          }
+
+          settleReject(
+            error instanceof Error
+              ? new AiModelInitializationError(error.message)
+              : new AiModelInitializationError(
+                  "Browser AI device selection failed.",
+                ),
+          );
         });
-      });
     });
+  }
+
+  /** Handles a Worker thread-level `onerror` occurring after init (i.e. during/around a generation). Distinct from the Worker-protocol `{type:"error"}` message, which means the worker's JS thread is still alive and is handled in `onWorkerMessage` instead. */
+  private handleWorkerThreadError(event: ErrorEvent): void {
+    const pending = this.pendingGenerate;
+    this.pendingGenerate = null;
+
+    if (this.worker) {
+      this.discardWorker(this.worker);
+    }
+
+    pending?.reject(
+      new AiGenerationError(
+        event.message || "Browser AI worker failed during generation.",
+      ),
+    );
   }
 
   private onWorkerMessage = (event: MessageEvent<AiWorkerResponse>): void => {
     const message = event.data;
     const pending = this.pendingGenerate;
 
+    if (!pending) {
+      return;
+    }
+
     if (message.type === "done") {
-      if (pending && pending.requestId === message.requestId) {
+      if (pending.requestId === message.requestId) {
         pending.resolve(message.text);
         this.pendingGenerate = null;
       }
@@ -345,7 +516,7 @@ export class BrowserAiRuntime implements AiRuntime {
     }
 
     if (message.type === "cancelled") {
-      if (pending && pending.requestId === message.requestId) {
+      if (pending.requestId === message.requestId) {
         pending.reject(new AiGenerationCancelledError());
         this.pendingGenerate = null;
       }
@@ -353,7 +524,7 @@ export class BrowserAiRuntime implements AiRuntime {
     }
 
     if (message.type === "error") {
-      if (pending && message.requestId === pending.requestId) {
+      if (pending.requestId === message.requestId) {
         pending.reject(new AiGenerationError(message.message));
         this.pendingGenerate = null;
       }
@@ -370,8 +541,10 @@ export class BrowserAiRuntime implements AiRuntime {
       return Promise.reject(new AiGenerationError("Browser AI worker is not initialized."));
     }
 
+    const token = this.workerToken;
+
     return new Promise<string>((resolve, reject) => {
-      this.pendingGenerate = { requestId, resolve, reject };
+      this.pendingGenerate = { requestId, token, resolve, reject };
       worker.postMessage({
         type: "generate",
         requestId,

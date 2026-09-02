@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import type { AiContextChunk } from "../types";
 import {
   AiRequestValidationError,
   ProhibitedAiRequestFieldError,
   assertValidAiCapabilities,
 } from "../validation";
 import {
+  BROWSER_AI_MAX_CONTEXT_CHARACTERS,
   BROWSER_AI_MODEL_DTYPE,
   BROWSER_AI_MODEL_ID,
   TRANSFORMERS_JS_VERSION,
@@ -16,8 +18,10 @@ import {
   AiGenerationCancelledError,
   AiGenerationError,
   AiModelInitializationError,
+  AiRuntimeDisposedError,
   AiRuntimeUnavailableError,
   BrowserAiRuntime,
+  boundContextChunks,
   buildBrowserAiMessages,
   probeBrowserAiAvailability,
   selectBrowserAiDevice,
@@ -33,16 +37,20 @@ class FakeWorker {
   onerror: ((event: ErrorEvent) => void) | null = null;
   lastGenerate: Extract<AiWorkerRequest, { type: "generate" }> | null = null;
   generateHold = false;
+  initHold = false;
   failInit = false;
   failGenerate = false;
   generateCalls = 0;
   initCalls = 0;
+  terminateCalls = 0;
 
   postMessage(data: AiWorkerRequest): void {
     queueMicrotask(() => this.dispatch(data));
   }
 
-  terminate(): void {}
+  terminate(): void {
+    this.terminateCalls += 1;
+  }
 
   emit(message: AiWorkerResponse): void {
     this.onmessage?.({ data: message } as MessageEvent<AiWorkerResponse>);
@@ -51,6 +59,9 @@ class FakeWorker {
   private dispatch(data: AiWorkerRequest): void {
     if (data.type === "init") {
       this.initCalls += 1;
+      if (this.initHold) {
+        return;
+      }
       if (this.failInit) {
         this.emit({
           type: "error",
@@ -96,6 +107,33 @@ function runtimeWith(worker: FakeWorker): BrowserAiRuntime {
     workerFactory: () => worker as unknown as Worker,
     availabilityCheck: availableAlways,
     selectDevice: () => Promise.resolve("wasm"),
+  });
+}
+
+/** Returns workers from a fixed script in order, then falls back to fresh `FakeWorker`s — lets a test pre-configure (e.g. `generateHold`/`initHold`) the worker a given `generateText()` call will receive, while still exercising the real `workerFactory()` path for any later re-initialization. */
+function scriptedWorkerFactory(...scripted: FakeWorker[]): {
+  factory: () => Worker;
+  workers: FakeWorker[];
+} {
+  const workers: FakeWorker[] = [];
+  let index = 0;
+  const factory = () => {
+    const worker = index < scripted.length ? scripted[index] : new FakeWorker();
+    index += 1;
+    workers.push(worker);
+    return worker as unknown as Worker;
+  };
+  return { factory, workers };
+}
+
+function runtimeWithFactory(
+  factory: () => Worker,
+  selectDevice: () => Promise<"wasm" | "webgpu"> = () => Promise.resolve("wasm"),
+): BrowserAiRuntime {
+  return new BrowserAiRuntime({
+    workerFactory: factory,
+    availabilityCheck: availableAlways,
+    selectDevice,
   });
 }
 
@@ -211,6 +249,7 @@ describe("BrowserAiRuntime.generateText contract", () => {
       text: "generated text",
       providerId: "browser-ai",
       runtime: "browser",
+      contextTruncated: false,
     });
     expect(worker.lastGenerate?.messages).toEqual(
       buildBrowserAiMessages("Summarize this.", [
@@ -278,6 +317,248 @@ describe("BrowserAiRuntime.generateText contract", () => {
 
     runtime.cancel();
     await expect(first).rejects.toBeInstanceOf(AiGenerationCancelledError);
+  });
+});
+
+function makeChunk(
+  overrides: Partial<AiContextChunk> & { text: string },
+): AiContextChunk {
+  return {
+    chunkIndex: overrides.chunkIndex ?? 0,
+    pageNumber: overrides.pageNumber ?? 1,
+    text: overrides.text,
+    startOffset: overrides.startOffset ?? 0,
+    endOffset: overrides.endOffset ?? overrides.text.length,
+  };
+}
+
+describe("boundContextChunks", () => {
+  it("returns empty truncated=false for empty array", () => {
+    expect(boundContextChunks([], BROWSER_AI_MAX_CONTEXT_CHARACTERS)).toEqual({
+      chunks: [],
+      truncated: false,
+    });
+  });
+
+  it("returns all chunks when within budget", () => {
+    const chunks = [
+      makeChunk({ chunkIndex: 0, text: "a".repeat(3000) }),
+      makeChunk({ chunkIndex: 1, text: "b".repeat(3000) }),
+    ];
+    const result = boundContextChunks(chunks, BROWSER_AI_MAX_CONTEXT_CHARACTERS);
+    expect(result.chunks).toHaveLength(2);
+    expect(result.truncated).toBe(false);
+    expect(result.chunks[0].text).toBe(chunks[0].text);
+    expect(result.chunks[1].text).toBe(chunks[1].text);
+  });
+
+  it("truncates trailing chunks when total exceeds 8192 and does not slice", () => {
+    const a = makeChunk({ chunkIndex: 0, text: "a".repeat(3000) });
+    const b = makeChunk({ chunkIndex: 1, text: "b".repeat(3000) });
+    const c = makeChunk({ chunkIndex: 2, text: "c".repeat(3000) });
+    const original = [a, b, c];
+    const originalSnapshot = original.map((ch) => ({ ...ch }));
+    const result = boundContextChunks(original, BROWSER_AI_MAX_CONTEXT_CHARACTERS);
+    // A+B=6000 fits, C would make 9000 >8192 => truncated
+    expect(result.chunks).toHaveLength(2);
+    expect(result.chunks[0].text).toBe("a".repeat(3000));
+    expect(result.chunks[1].text).toBe("b".repeat(3000));
+    expect(result.truncated).toBe(true);
+    // no mutation
+    expect(original).toHaveLength(3);
+    expect(original[0].text).toBe(originalSnapshot[0].text);
+    // deterministic: later chunks not included
+    expect(result.chunks.map((ch) => ch.chunkIndex)).toEqual([0, 1]);
+  });
+
+  it("returns zero chunks truncated=true when first chunk alone exceeds budget", () => {
+    const huge = makeChunk({ text: "x".repeat(9000) });
+    const result = boundContextChunks([huge], BROWSER_AI_MAX_CONTEXT_CHARACTERS);
+    expect(result.chunks).toHaveLength(0);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("does not skip an oversized chunk to include later ones", () => {
+    const huge = makeChunk({ chunkIndex: 0, text: "x".repeat(9000) });
+    const small = makeChunk({ chunkIndex: 1, text: "y".repeat(100) });
+    const result = boundContextChunks([huge, small], BROWSER_AI_MAX_CONTEXT_CHARACTERS);
+    expect(result.chunks).toHaveLength(0);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("never mutates input array or objects", () => {
+    const a = makeChunk({ chunkIndex: 0, text: "a".repeat(10) });
+    const b = makeChunk({ chunkIndex: 1, text: "b".repeat(10) });
+    const input = [a, b];
+    boundContextChunks(input, 15);
+    expect(input).toHaveLength(2);
+    expect(a.text).toBe("a".repeat(10));
+  });
+});
+
+describe("BrowserAiRuntime context budget integration", () => {
+  it("sends all chunks and contextTruncated=false when within 8192", async () => {
+    const worker = new FakeWorker();
+    const runtime = runtimeWith(worker);
+    const chunks = [
+      makeChunk({ chunkIndex: 0, text: "a".repeat(1000) }),
+      makeChunk({ chunkIndex: 1, text: "b".repeat(1000) }),
+    ];
+    const result = await runtime.generateText({ prompt: "hi", contextChunks: chunks });
+    expect(result.contextTruncated).toBe(false);
+    expect(worker.lastGenerate?.messages).toEqual(buildBrowserAiMessages("hi", chunks));
+  });
+
+  it("truncates trailing chunks and reports contextTruncated=true", async () => {
+    const worker = new FakeWorker();
+    const runtime = runtimeWith(worker);
+    const a = makeChunk({ chunkIndex: 0, text: "a".repeat(3000) });
+    const b = makeChunk({ chunkIndex: 1, text: "b".repeat(3000) });
+    const c = makeChunk({ chunkIndex: 2, text: "c".repeat(3000) });
+    const result = await runtime.generateText({
+      prompt: "hi",
+      contextChunks: [a, b, c],
+    });
+    expect(result.contextTruncated).toBe(true);
+    const expected = buildBrowserAiMessages("hi", [a, b]);
+    expect(worker.lastGenerate?.messages).toEqual(expected);
+    // no partial slice
+    expect(worker.lastGenerate?.messages[1].content).not.toContain("c");
+  });
+
+  it("handles empty and undefined context as not truncated", async () => {
+    const w1 = new FakeWorker();
+    const r1 = runtimeWith(w1);
+    const res1 = await r1.generateText({ prompt: "hi" });
+    expect(res1.contextTruncated).toBe(false);
+    expect(w1.lastGenerate?.messages).toEqual(buildBrowserAiMessages("hi", []));
+
+    const w2 = new FakeWorker();
+    const r2 = runtimeWith(w2);
+    const res2 = await r2.generateText({ prompt: "hi", contextChunks: [] });
+    expect(res2.contextTruncated).toBe(false);
+  });
+
+  it("handles oversized first chunk: zero chunks to Worker, truncated=true but still succeeds", async () => {
+    const worker = new FakeWorker();
+    const runtime = runtimeWith(worker);
+    const huge = makeChunk({ text: "x".repeat(9000) });
+    const result = await runtime.generateText({ prompt: "hi", contextChunks: [huge] });
+    expect(result.contextTruncated).toBe(true);
+    expect(result.text).toBe("generated text");
+    expect(worker.lastGenerate?.messages).toEqual(buildBrowserAiMessages("hi", []));
+  });
+
+  it("does not include system prompt in budget — only chunk text length counts", async () => {
+    const worker = new FakeWorker();
+    const runtime = runtimeWith(worker);
+    // prompt is long but should not affect truncation
+    const longPrompt = "p".repeat(5000);
+    const chunks = [makeChunk({ text: "a".repeat(8000) })];
+    const result = await runtime.generateText({ prompt: longPrompt, contextChunks: chunks });
+    expect(result.contextTruncated).toBe(false);
+  });
+});
+
+describe("BrowserAiRuntime lifecycle hardening", () => {
+  it("dispose during pending generation rejects with AiRuntimeDisposedError and allows next generation", async () => {
+    const w1 = new FakeWorker();
+    w1.generateHold = true;
+    const { factory, workers } = scriptedWorkerFactory(w1, new FakeWorker());
+    const runtime = runtimeWithFactory(factory);
+
+    const first = runtime.generateText({ prompt: "first" });
+    await vi.waitFor(() => expect(workers[0].lastGenerate).not.toBeNull());
+
+    runtime.dispose();
+    await expect(first).rejects.toBeInstanceOf(AiRuntimeDisposedError);
+
+    // next generation must succeed with fresh worker
+    const second = await runtime.generateText({ prompt: "second" });
+    expect(second.text).toBe("generated text");
+    expect(second.contextTruncated).toBe(false);
+    expect(workers).toHaveLength(2);
+    expect(workers[1].initCalls).toBe(1);
+  });
+
+  it("dispose during initialization rejects and remains reusable", async () => {
+    const w1 = new FakeWorker();
+    w1.initHold = true;
+    const { factory, workers } = scriptedWorkerFactory(w1, new FakeWorker());
+    const runtime = runtimeWithFactory(factory);
+
+    const pending = runtime.generateText({ prompt: "hello" });
+    // give ensureInitialized time to start initHold
+    await new Promise((r) => setTimeout(r, 10));
+    runtime.dispose();
+    await expect(pending).rejects.toBeInstanceOf(AiRuntimeDisposedError);
+
+    const second = await runtime.generateText({ prompt: "after" });
+    expect(second.text).toBe("generated text");
+    expect(workers).toHaveLength(2);
+  });
+
+  it("Worker.onerror during generation discards broken Worker and next generation uses new Worker", async () => {
+    const w1 = new FakeWorker();
+    w1.generateHold = true;
+    const { factory, workers } = scriptedWorkerFactory(w1, new FakeWorker());
+    const runtime = runtimeWithFactory(factory);
+
+    const first = runtime.generateText({ prompt: "first" });
+    await vi.waitFor(() => expect(workers[0].lastGenerate).not.toBeNull());
+
+    // simulate thread-level crash
+    workers[0].onerror?.({ message: "thread crash" } as ErrorEvent);
+
+    await expect(first).rejects.toBeInstanceOf(AiGenerationError);
+    expect(workers[0].terminateCalls).toBe(1);
+
+    const second = await runtime.generateText({ prompt: "second" });
+    expect(second.text).toBe("generated text");
+    expect(workers).toHaveLength(2);
+    expect(workers[1].initCalls).toBe(1);
+    expect(workers[1].generateCalls).toBe(1);
+  });
+
+  it("selectDevice rejection rejects generateText, resets inFlight, and remains reusable", async () => {
+    let shouldReject = true;
+    const selectDevice = () =>
+      shouldReject ? Promise.reject(new Error("device probe failed")) : Promise.resolve("wasm" as const);
+    const { factory, workers } = scriptedWorkerFactory(new FakeWorker(), new FakeWorker());
+    const runtime = runtimeWithFactory(factory, selectDevice);
+
+    await expect(runtime.generateText({ prompt: "first" })).rejects.toBeInstanceOf(
+      AiModelInitializationError,
+    );
+    // inFlight must have reset — second call should not throw concurrent error
+    shouldReject = false;
+    const second = await runtime.generateText({ prompt: "second" });
+    expect(second.text).toBe("generated text");
+    expect(workers).toHaveLength(2);
+  });
+
+  it("late messages after dispose cannot settle a later generation", async () => {
+    const w1 = new FakeWorker();
+    w1.generateHold = true;
+    const w2 = new FakeWorker();
+    const { factory, workers } = scriptedWorkerFactory(w1, w2);
+    const runtime = runtimeWithFactory(factory);
+
+    const first = runtime.generateText({ prompt: "first" });
+    await vi.waitFor(() => expect(workers[0].lastGenerate).not.toBeNull());
+    const firstRequestId = workers[0].lastGenerate!.requestId;
+
+    runtime.dispose();
+    await expect(first).rejects.toBeInstanceOf(AiRuntimeDisposedError);
+
+    // late done from old worker with old requestId must not affect new generation
+    const secondPromise = runtime.generateText({ prompt: "second" });
+    // emit late message from disposed worker using old requestId
+    workers[0].emit({ type: "done", requestId: firstRequestId, text: "late text" });
+    // second should still resolve with its own worker's text, not late text
+    const second = await secondPromise;
+    expect(second.text).toBe("generated text");
+    expect(second.text).not.toBe("late text");
   });
 });
 

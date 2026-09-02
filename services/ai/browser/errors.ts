@@ -42,3 +42,18 @@ export class AiConcurrentGenerationError extends Error {
     this.name = "AiConcurrentGenerationError";
   }
 }
+
+/**
+ * Thrown to settle a pending `generateText()` call (init or generation
+ * phase) when `dispose()` is called while it is still in flight. Distinct
+ * from `AiGenerationCancelledError`, which represents an explicit
+ * `cancel()` of a running generation rather than teardown of the runtime.
+ */
+export class AiRuntimeDisposedError extends Error {
+  constructor(
+    message = "Browser AI runtime was disposed while an operation was pending.",
+  ) {
+    super(message);
+    this.name = "AiRuntimeDisposedError";
+  }
+}
