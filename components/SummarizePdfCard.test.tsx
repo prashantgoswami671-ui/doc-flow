@@ -55,6 +55,16 @@ describe("SummarizePdfCard", () => {
     expect(btn).toBeDisabled();
   });
 
+  it("shows the supported-envelope disclosure (context size, truncation, local processing, quality varies)", () => {
+    render(<SummarizePdfCard />);
+    expect(
+      screen.getByText(/up to about 8,192 characters of extracted PDF text/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/longer documents may be truncated/i)).toBeInTheDocument();
+    expect(screen.getByText(/generated locally in your browser/i)).toBeInTheDocument();
+    expect(screen.getByText(/quality can vary by document/i)).toBeInTheDocument();
+  });
+
   it("valid PDF selection shows file and enables Summarize", async () => {
     render(<SummarizePdfCard />);
     const file = makePdfFile();

@@ -196,6 +196,11 @@ export default function SummarizePdfCard() {
             downloaded and cached in your browser. Your document content is not sent to a cloud AI
             provider.
           </p>
+          <p className="mt-1 text-xs text-gray-400">
+            Browser AI processes up to about 8,192 characters of extracted PDF text per request —
+            longer documents may be truncated. Summaries are generated locally in your browser, and
+            quality can vary by document.
+          </p>
         </div>
 
         <UploadZone

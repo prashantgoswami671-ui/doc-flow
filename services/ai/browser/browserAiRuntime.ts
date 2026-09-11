@@ -124,20 +124,28 @@ export async function probeBrowserAiAvailability(
   return { available: true };
 }
 
+/**
+ * 6C-D — Temporary production backend pin.
+ *
+ * Windows/Chrome with `device:"webgpu"` + `onnx-community/Qwen2.5-0.5B-Instruct`
+ * + `dtype:"q4"` fails deterministically at ONNX `InferenceSession.create()`
+ * with `Can't create a session. ERROR_CODE: 6, ERROR_MESSAGE: std::bad_alloc`
+ * (reported on 1-page PDF, before any generation; same in `transformers.js`
+ * #1518 for this model class). The identical model/dtype succeeds on `wasm`
+ * (see `docs/AI_BROWSER_PROTOTYPE_BENCHMARK.md` 41-page wasm success and
+ * the 6C-D diagnostic harness).
+ *
+ * Until WebGPU is validated per-device/model, Tier-1 Browser AI is pinned to
+ * the known-good `wasm` backend. The `selectDevice` injection seam on
+ * `BrowserAiRuntime` remains intact for tests and for a future
+ * per-device WebGPU re-enable. Revisit by restoring adapter probing here and
+ * bumping the `transformers.js`/`onnxruntime-web` pin.
+ */
 export async function selectBrowserAiDevice(
-  host: BrowserAiHost = globalThis as BrowserAiHost,
+  _host: BrowserAiHost = globalThis as BrowserAiHost,
 ): Promise<AiWorkerDevice> {
-  const gpu = host.navigator?.gpu;
-  if (!gpu || typeof gpu.requestAdapter !== "function") {
-    return "wasm";
-  }
-
-  try {
-    const adapter = await gpu.requestAdapter();
-    return adapter ? "webgpu" : "wasm";
-  } catch {
-    return "wasm";
-  }
+  void _host;
+  return "wasm";
 }
 
 /**
