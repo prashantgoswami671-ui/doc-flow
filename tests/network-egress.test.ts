@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, extname } from "node:path";
+import { OLLAMA_BASE_URL } from "../services/ai/ollama/types";
 
 /**
  * Pre-Phase-5 hardening — static network-egress regression guard.
@@ -17,8 +18,9 @@ import { join, relative, extname } from "node:path";
  *
  * This test converts that finding into a static, dependency-free regression
  * guard: it scans production source files as text (comments stripped) and
- * fails if a new network-primitive call site appears anywhere, or if
- * `fetch(` appears anywhere other than the one already-reviewed location.
+ * fails if a new network-primitive call site appears anywhere, or if a
+ * `fetch()`/`fetchImpl()` call appears anywhere other than the allowlisted,
+ * already-reviewed locations.
  *
  * Deliberate scope limits (see the SEC-06/pre-Phase-5 hardening note in
  * docs/DOCFLOW_STATUS.md for the full discussion):
@@ -29,10 +31,14 @@ import { join, relative, extname } from "node:path";
  *   internal jsDelivr asset requests are a known, disclosed, third-party
  *   dependency behavior (SEC-05), not a DocFlow-authored egress path, and
  *   are out of this guard's scope by design.
- * - It intentionally does NOT yet encode any AI-provider-specific rules
- *   (allowed request shape, Ollama URL allowlisting, consent-gating, etc.)
- *   from docs/SEC-06-AI-DATA-POLICY.md — those require AI-01/AI-02 to
- *   exist first and are out of scope for this guard.
+ * - T2-01 (2026-09-13) — the production Ollama provider added the second
+ *   and only other egress path: services/ai/ollama/client.ts, talking to a
+ *   local Ollama server. Its boundary is pinned by this guard: the fetch
+ *   allowlist covers exactly that file, and the loopback-only test asserts
+ *   the module can only target http://127.0.0.1:11434 (a single URL literal
+ *   in types.ts, no environment-driven endpoint). Any new egress
+ *   destination still needs SEC-06 policy review
+ *   (docs/SEC-06-AI-DATA-POLICY.md) before landing.
  *
  * Checkpoint 2A (Browser AI prototype) investigation note, added
  * 2026-08-31 — findings per checkpoint spec §16 before any test change:
@@ -68,10 +74,17 @@ const SCAN_ROOT_DIRS = ["app", "components", "services", "lib"];
 const SCAN_EXTENSIONS = new Set([".ts", ".tsx"]);
 const EXCLUDED_DIR_NAMES = new Set(["__fixtures__", "node_modules"]);
 
-// The one already-reviewed fetch() call site (SEC-02). Any other file
-// containing `fetch(` fails this test — see the file-level doc comment for
-// why this is intentionally strict rather than allowlisting a keyword.
-const ALLOWED_FETCH_FILES = new Set(["services/pdf/rasterize.ts"]);
+// The already-reviewed fetch() call sites. Any other file containing a
+// fetch()/fetchImpl() call fails this test — see the file-level doc comment
+// for why this is intentionally strict rather than allowlisting a keyword.
+//
+// - services/pdf/rasterize.ts: local data: URL only (SEC-02).
+// - services/ai/ollama/client.ts: the T2-01 Ollama provider — loopback-only
+//   endpoint, enforced by the dedicated test below.
+const ALLOWED_FETCH_FILES = new Set([
+  "services/pdf/rasterize.ts",
+  "services/ai/ollama/client.ts",
+]);
 
 const PROJECT_ROOT = process.cwd();
 
@@ -167,13 +180,17 @@ describe("network egress regression guard (pre-Phase-5 hardening)", () => {
     ).toEqual([]);
   });
 
-  it("contains fetch() only in the one already-reviewed local-data-URL call site", () => {
+  it("contains fetch()/fetchImpl() only in the already-reviewed allowlisted call sites", () => {
     const filesWithFetch: string[] = [];
 
     for (const filePath of sourceFiles) {
       const content = stripComments(readFileSync(filePath, "utf-8"));
 
-      if (/\bfetch\s*\(/.test(content)) {
+      // Match direct fetch() calls and the fetchImpl(...) alias used by the
+      // Ollama client. Without the alias, the allowlisted Ollama site would
+      // be invisible to this guard — and new aliases would slip through
+      // unreviewed.
+      if (/\bfetch(?:Impl)?\s*\(/.test(content)) {
         filesWithFetch.push(toRepoRelativePath(filePath));
       }
     }
@@ -184,15 +201,54 @@ describe("network egress regression guard (pre-Phase-5 hardening)", () => {
 
     expect(
       unexpectedFiles,
-      `Found a new fetch() call site outside the allowlist: ${unexpectedFiles.join(", ")}. ` +
-        `Only ${[...ALLOWED_FETCH_FILES].join(", ")} is permitted to call fetch() today (a local data: URL, per SEC-02). ` +
+      `Found a new fetch()/fetchImpl() call site outside the allowlist: ${unexpectedFiles.join(", ")}. ` +
+        `Only ${[...ALLOWED_FETCH_FILES].join(", ")} are permitted to call fetch() today ` +
+        `(a local data: URL per SEC-02, and the loopback-only Ollama client per T2-01). ` +
         `A new fetch() call site is exactly the kind of change SEC-06 (docs/SEC-06-AI-DATA-POLICY.md) requires review for before it lands.`,
     ).toEqual([]);
 
-    // Also confirm the one allowed site is still actually present — if it
-    // ever disappears (e.g. rasterize.ts is refactored to drop the
-    // toDataURL/fetch path entirely), that's worth noticing too, since it
-    // means this allowlist entry is stale and should be removed.
+    // Also confirm every allowlisted site is still actually present — if one
+    // ever disappears (e.g. rasterize.ts drops the toDataURL/fetch path, or
+    // the Ollama client is refactored away), that's a stale allowlist entry
+    // that should be removed.
     expect(filesWithFetch).toEqual(expect.arrayContaining([...ALLOWED_FETCH_FILES]));
+  });
+
+  // T2-01 — the Ollama provider is the only AI egress path, and it must be
+  // loopback-only. This complements the functional tests in
+  // services/ai/ollama/runtime.test.ts with a static, whole-module view.
+  it("pins the Ollama fetch boundary to the fixed loopback endpoint", () => {
+    // The exact constant the production client defaults to.
+    expect(OLLAMA_BASE_URL).toBe("http://127.0.0.1:11434");
+
+    const ollamaFiles = sourceFiles.filter((filePath) =>
+      toRepoRelativePath(filePath).startsWith("services/ai/ollama/"),
+    );
+
+    // Guard against the module silently moving or renaming out of the scan.
+    expect(ollamaFiles.length).toBeGreaterThan(0);
+
+    const strippedByFile = ollamaFiles.map((filePath) => ({
+      file: toRepoRelativePath(filePath),
+      content: stripComments(readFileSync(filePath, "utf-8")),
+    }));
+
+    // No environment-driven endpoint: process.env must not appear anywhere
+    // in the Ollama module, so the base URL cannot be overridden at runtime.
+    const filesWithEnv = strippedByFile
+      .filter(({ content }) => content.includes("process.env"))
+      .map(({ file }) => file);
+    expect(filesWithEnv).toEqual([]);
+
+    // Exactly one absolute URL literal exists in the whole module, and it is
+    // the fixed loopback constant — so no other egress destination can be
+    // introduced without failing this test.
+    const urlLiterals = strippedByFile.flatMap(({ file, content }) => {
+      const matches = content.match(/https?:\/\/[^\s"'`)+]+/g) ?? [];
+      return matches.map((match) => ({ file, match }));
+    });
+    expect(urlLiterals).toEqual([
+      { file: "services/ai/ollama/types.ts", match: "http://127.0.0.1:11434" },
+    ]);
   });
 });
