@@ -43,3 +43,6 @@ yarn-error.log*
 next-env.d.ts
 __pycache__/
 *.py[cod]
+
+# T2-02 benchmark local inputs/results (never committed)
+/benchmark-docs/

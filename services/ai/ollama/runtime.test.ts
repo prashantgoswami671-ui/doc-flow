@@ -531,6 +531,90 @@ describe("createOllamaClient", () => {
     expect(body.options?.num_predict).toBe(100);
   });
 
+  it("generateDetailed returns Ollama metrics alongside the text and sends the identical request shape", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: OLLAMA_MODEL,
+        created_at: new Date().toISOString(),
+        response: "detailed response",
+        done: true,
+        prompt_eval_count: 1234,
+        eval_count: 256,
+        total_duration: 5_000_000_000,
+        load_duration: 1_000_000_000,
+        prompt_eval_duration: 500_000_000,
+        eval_duration: 3_000_000_000,
+      }),
+    } as Response);
+
+    const client = createOllamaClient({ fetchImpl: mockFetch });
+    const detailed = await client.generateDetailed("test prompt", [], {
+      temperature: 0.4,
+      maxOutputTokens: 128,
+    });
+
+    expect(detailed.text).toBe("detailed response");
+    // Nanoseconds -> milliseconds.
+    expect(detailed.promptEvalCount).toBe(1234);
+    expect(detailed.evalCount).toBe(256);
+    expect(detailed.totalDurationMs).toBe(5000);
+    expect(detailed.loadDurationMs).toBe(1000);
+    expect(detailed.promptEvalDurationMs).toBe(500);
+    expect(detailed.evalDurationMs).toBe(3000);
+
+    // Same wire request as generate(): same model/prompt/stream/options.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:11434/api/generate");
+    const body = JSON.parse(init.body as string);
+    expect(body.model).toBe(OLLAMA_MODEL);
+    expect(body.stream).toBe(false);
+    expect(body.options).toEqual({ temperature: 0.4, num_predict: 128 });
+  });
+
+  it("generateDetailed reports null metrics when Ollama omits them (never fabricated)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: OLLAMA_MODEL,
+        created_at: new Date().toISOString(),
+        response: "minimal response",
+        done: true,
+      }),
+    } as Response);
+
+    const client = createOllamaClient({ fetchImpl: mockFetch });
+    const detailed = await client.generateDetailed("test prompt");
+
+    expect(detailed.text).toBe("minimal response");
+    expect(detailed.promptEvalCount).toBeNull();
+    expect(detailed.evalCount).toBeNull();
+    expect(detailed.totalDurationMs).toBeNull();
+    expect(detailed.loadDurationMs).toBeNull();
+    expect(detailed.promptEvalDurationMs).toBeNull();
+    expect(detailed.evalDurationMs).toBeNull();
+  });
+
+  it("generateDetailed maps errors identically to generate()", async () => {
+    const unreachable = createOllamaClient({
+      fetchImpl: vi.fn().mockRejectedValue(new Error("ECONNREFUSED")),
+    });
+    await expect(unreachable.generateDetailed("p")).rejects.toBeInstanceOf(OllamaGenerationError);
+
+    const modelMissing = createOllamaClient({
+      fetchImpl: vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        json: async () => ({ error: "model 'qwen3:4b' not found" }),
+      } as Response),
+    });
+    await expect(modelMissing.generateDetailed("p")).rejects.toBeInstanceOf(
+      OllamaModelNotFoundError,
+    );
+  });
+
   it("checkAvailability returns available=false when fetch fails", async () => {
     const mockFetch = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
 

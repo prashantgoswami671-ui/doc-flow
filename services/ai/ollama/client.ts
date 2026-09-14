@@ -69,6 +69,25 @@ export class OllamaGenerationError extends OllamaClientError {
   }
 }
 
+/**
+ * Metrics for a single /api/generate call, alongside the generated text.
+ * Ollama reports durations in nanoseconds; they are converted to
+ * milliseconds here. Token counts and durations are `null` when Ollama
+ * did not report them (never fabricated) — e.g. `loadDurationMs` is
+ * typically ~0 on a warm run and the real load time on a cold one.
+ */
+export interface OllamaGenerateDetailedResult {
+  text: string;
+  /** Prompt (input) tokens evaluated by Ollama, when reported. */
+  promptEvalCount: number | null;
+  /** Generated (output) tokens produced by Ollama, when reported. */
+  evalCount: number | null;
+  totalDurationMs: number | null;
+  loadDurationMs: number | null;
+  promptEvalDurationMs: number | null;
+  evalDurationMs: number | null;
+}
+
 const DOCUMENT_CONTEXT_START = "<<<DOCUMENT_CONTEXT_START>>>";
 const DOCUMENT_CONTEXT_END = "<<<DOCUMENT_CONTEXT_END>>>";
 
@@ -98,6 +117,49 @@ export function buildOllamaPrompt(
   }
 
   return `${SYSTEM_INSTRUCTION}\n\n${userParts.join("\n")}`;
+}
+
+/**
+ * Builds the request body shared by generate() and generateDetailed().
+ * Both send the identical wire request; generateDetailed only surfaces
+ * the metric fields Ollama already returns with the response.
+ */
+function buildGenerateRequestBody(
+  prompt: string,
+  contextChunks?: { text: string; pageNumber: number; chunkIndex: number }[],
+  settings?: { temperature?: number; maxOutputTokens?: number },
+): OllamaGenerateRequest {
+  return {
+    model: OLLAMA_MODEL,
+    prompt: buildOllamaPrompt(prompt, contextChunks),
+    stream: false,
+    options: {
+      temperature: settings?.temperature ?? OLLAMA_DEFAULT_TEMPERATURE,
+      num_predict: settings?.maxOutputTokens ?? OLLAMA_DEFAULT_MAX_TOKENS,
+    },
+  };
+}
+
+/** Shared error mapping for /api/generate calls (used by generate and generateDetailed). */
+function toGenerateError(error: unknown): unknown {
+  if (error instanceof OllamaClientError) {
+    if (error.status === 404 && error.message.includes("model")) {
+      return new OllamaModelNotFoundError(OLLAMA_MODEL, OLLAMA_API_GENERATE);
+    }
+    return new OllamaGenerationError(error.message, error.status, OLLAMA_API_GENERATE);
+  }
+  return new OllamaGenerationError(
+    error instanceof Error ? error.message : "Unknown generation error",
+    null,
+    OLLAMA_API_GENERATE,
+  );
+}
+
+/** Converts Ollama's nanosecond durations to milliseconds; null when unreported. */
+function nanosecondsToMilliseconds(nanoseconds: number | undefined): number | null {
+  return typeof nanoseconds === "number" && Number.isFinite(nanoseconds)
+    ? nanoseconds / 1_000_000
+    : null;
 }
 
 /**
@@ -170,17 +232,7 @@ export function createOllamaClient(options: OllamaClientOptions = {}): OllamaCli
       contextChunks?: { text: string; pageNumber: number; chunkIndex: number }[],
       settings?: { temperature?: number; maxOutputTokens?: number },
     ): Promise<string> {
-      const fullPrompt = buildOllamaPrompt(prompt, contextChunks);
-
-      const requestBody: OllamaGenerateRequest = {
-        model: OLLAMA_MODEL,
-        prompt: fullPrompt,
-        stream: false,
-        options: {
-          temperature: settings?.temperature ?? OLLAMA_DEFAULT_TEMPERATURE,
-          num_predict: settings?.maxOutputTokens ?? OLLAMA_DEFAULT_MAX_TOKENS,
-        },
-      };
+      const requestBody = buildGenerateRequestBody(prompt, contextChunks, settings);
 
       try {
         const response = await request<OllamaGenerateResponse>(OLLAMA_API_GENERATE, {
@@ -194,17 +246,44 @@ export function createOllamaClient(options: OllamaClientOptions = {}): OllamaCli
 
         return response.response;
       } catch (error) {
-        if (error instanceof OllamaClientError) {
-          if (error.status === 404 && error.message.includes("model")) {
-            throw new OllamaModelNotFoundError(OLLAMA_MODEL, OLLAMA_API_GENERATE);
-          }
-          throw new OllamaGenerationError(error.message, error.status, OLLAMA_API_GENERATE);
+        throw toGenerateError(error);
+      }
+    },
+
+    /**
+     * Same request as generate(), but also surfaces the metric fields
+     * Ollama returns with the /api/generate response (token counts and
+     * durations). Additive — generate() behavior is unchanged.
+     */
+    async generateDetailed(
+      prompt: string,
+      contextChunks?: { text: string; pageNumber: number; chunkIndex: number }[],
+      settings?: { temperature?: number; maxOutputTokens?: number },
+    ): Promise<OllamaGenerateDetailedResult> {
+      const requestBody = buildGenerateRequestBody(prompt, contextChunks, settings);
+
+      try {
+        const response = await request<OllamaGenerateResponse>(OLLAMA_API_GENERATE, {
+          method: "POST",
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.done) {
+          throw new OllamaGenerationError("Ollama generation did not complete (done=false)", null, OLLAMA_API_GENERATE);
         }
-        throw new OllamaGenerationError(
-          error instanceof Error ? error.message : "Unknown generation error",
-          null,
-          OLLAMA_API_GENERATE,
-        );
+
+        return {
+          text: response.response,
+          promptEvalCount:
+            typeof response.prompt_eval_count === "number" ? response.prompt_eval_count : null,
+          evalCount: typeof response.eval_count === "number" ? response.eval_count : null,
+          totalDurationMs: nanosecondsToMilliseconds(response.total_duration),
+          loadDurationMs: nanosecondsToMilliseconds(response.load_duration),
+          promptEvalDurationMs: nanosecondsToMilliseconds(response.prompt_eval_duration),
+          evalDurationMs: nanosecondsToMilliseconds(response.eval_duration),
+        };
+      } catch (error) {
+        throw toGenerateError(error);
       }
     },
 
@@ -228,5 +307,10 @@ export interface OllamaClient {
     contextChunks?: { text: string; pageNumber: number; chunkIndex: number }[],
     settings?: { temperature?: number; maxOutputTokens?: number },
   ): Promise<string>;
+  generateDetailed(
+    prompt: string,
+    contextChunks?: { text: string; pageNumber: number; chunkIndex: number }[],
+    settings?: { temperature?: number; maxOutputTokens?: number },
+  ): Promise<OllamaGenerateDetailedResult>;
   showModel(): Promise<OllamaShowResponse>;
 }
