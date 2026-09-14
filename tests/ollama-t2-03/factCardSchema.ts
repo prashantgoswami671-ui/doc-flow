@@ -17,7 +17,7 @@
  * the causal relationship is actually supported.
  */
 
-export type FactCardClaimKind = "definition" | "fact" | "comparison" | "conclusion";
+export type FactCardClaimKind = "fact" | "comparison" | "conclusion";
 
 export interface FactCardDefinition {
   term: string;

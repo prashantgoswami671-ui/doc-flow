@@ -46,8 +46,7 @@ function validCard(): FactCard {
         text: "WB urban literacy exceeds WB rural literacy.",
         excerpt:
           "West Bengal urban literacy was 84.78% because government infrastructure spending rose, while rural literacy was 72.13%.",
-        excerpt2:
-          "West Bengal urban literacy was 84.78% because government infrastructure spending rose, while rural literacy was 72.13%.",
+        excerpt2: "West Bengal urban literacy was 84.78%",
         pages: [3],
         causal: false,
       },
@@ -158,6 +157,46 @@ describe("validateFactCard", () => {
     const result = validateFactCard(card, CHUNK, 6);
     expect(result.ok).toBe(false);
     expect(result.reasons.some((r) => r.includes("excerpt2"))).toBe(true);
+  });
+
+  it("rejects comparisons whose excerpt2 duplicates excerpt", () => {
+    const sameEvidence =
+      "West Bengal urban literacy was 84.78% because government infrastructure spending rose, while rural literacy was 72.13%.";
+    const card = {
+      ...validCard(),
+      claims: [
+        {
+          kind: "comparison",
+          text: "Urban exceeds rural.",
+          excerpt: sameEvidence,
+          excerpt2: sameEvidence,
+          pages: [3],
+          causal: false,
+        },
+      ],
+    };
+    const result = validateFactCard(card, CHUNK, 6);
+    expect(result.ok).toBe(false);
+    expect(result.reasons.some((r) => r.includes("distinct source evidence"))).toBe(true);
+  });
+
+  it("rejects kind definition on claims (definitions belong in definitions[])", () => {
+    const card = {
+      ...validCard(),
+      claims: [
+        {
+          kind: "definition",
+          text: "Growth means GSDP rise.",
+          excerpt:
+            "Economic growth means a rise in GSDP while economic development covers literacy and health.",
+          pages: [3],
+          causal: false,
+        },
+      ],
+    };
+    const result = validateFactCard(card, CHUNK, 6);
+    expect(result.ok).toBe(false);
+    expect(result.reasons.some((r) => r.includes("claims[0].kind"))).toBe(true);
   });
 
   it("rejects causal:true without causalExcerpt", () => {

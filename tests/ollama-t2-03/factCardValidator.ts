@@ -88,7 +88,7 @@ function validateClaim(
     return;
   }
   const typed = claim as unknown as FactCardClaim;
-  const validKinds = ["definition", "fact", "comparison", "conclusion"];
+  const validKinds = ["fact", "comparison", "conclusion"];
   if (!validKinds.includes(typed.kind as string)) {
     reasons.push(`${prefix}.kind must be one of ${validKinds.join(", ")}.`);
   }
@@ -113,6 +113,11 @@ function validateClaim(
       reasons.push(
         `${prefix} is a comparison and requires excerpt2 as a second verbatim substring of the source chunk text (one excerpt per side).`,
       );
+    } else if (
+      isNonEmptyString(typed.excerpt) &&
+      normalizeForMatch(typed.excerpt) === normalizeForMatch(typed.excerpt2)
+    ) {
+      reasons.push(`${prefix} comparison excerpts must provide distinct source evidence.`);
     }
   }
   if (typeof typed.causal !== "boolean") {
