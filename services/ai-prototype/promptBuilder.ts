@@ -136,11 +136,31 @@ export function buildMapSummarizePrompt(options: BuildMapSummarizePromptOptions)
     throw new Error("Map batch received no chunks — nothing to summarize.");
   }
 
-  const caveats: string[] = [
-    `This is part ${batchIndex + 1} of ${batchCount} of a longer document. Summarize ONLY the ` +
-      "portion shown below — do not assume you have seen the rest of the document, and do not " +
-      "claim to describe content that is not shown here.",
-  ];
+  // Map-prompt experiment (approved replacement — see promptBuilder.test.ts for the
+  // corresponding assertions): fact-extraction framing instead of generic
+  // "summarize" framing, an explicit anti-preamble instruction, an explicit
+  // priority order for what to keep under a tight token budget, and an
+  // explicit instruction against paraphrasing away exact figures/terms.
+  // The unsupported-conclusions guard and the part-boundary sentence are
+  // unchanged in substance from the prior wording.
+  const mapInstruction =
+    `List the key facts from the document context below (part ${batchIndex + 1}/${batchCount}).\n` +
+    "Do not write an introductory sentence or general topic description. Start directly with facts.\n" +
+    "\n" +
+    "If space is limited, prioritize:\n" +
+    "1. specific numbers and statistics,\n" +
+    "2. definitions,\n" +
+    "3. named comparisons,\n" +
+    "4. explicitly stated findings or conclusions.\n" +
+    "Do not repeat these category labels in your output — just list the facts.\n" +
+    "Use exact numbers, terms, and names from the text. Do not replace them with vague descriptions.\n" +
+    "Do not draw conclusions or causal connections that are not explicitly supported by the provided text.\n" +
+    "\n" +
+    `This is part ${batchIndex + 1} of ${batchCount} of a longer document. List facts ONLY from the ` +
+    "portion shown here. Do not assume you have seen the rest of the document or claim information " +
+    "that is not shown here.";
+
+  const caveats: string[] = [];
   if (hasPagesWithoutText) {
     caveats.push(
       "Note: one or more pages of the overall document had no extractable text (e.g. scanned/image-only) and are not included in this run.",
@@ -153,12 +173,7 @@ export function buildMapSummarizePrompt(options: BuildMapSummarizePromptOptions)
   }
 
   const documentContextBlock = renderDocumentContextBlock(chunks);
-  const userContent = [
-    `Summarize the document context below (part ${batchIndex + 1}/${batchCount}).`,
-    ...caveats,
-    "",
-    documentContextBlock,
-  ].join("\n");
+  const userContent = [mapInstruction, ...caveats, "", documentContextBlock].join("\n");
 
   return [
     { role: "system", content: PROTOTYPE_SYSTEM_INSTRUCTION },
@@ -168,10 +183,40 @@ export function buildMapSummarizePrompt(options: BuildMapSummarizePromptOptions)
 
 const INTERMEDIATE_SUMMARIES_START = "<<<INTERMEDIATE_SUMMARIES_START>>>";
 const INTERMEDIATE_SUMMARIES_END = "<<<INTERMEDIATE_SUMMARIES_END>>>";
+const SOURCE_EVIDENCE_START = "<<<SOURCE_EVIDENCE_START>>>";
+const SOURCE_EVIDENCE_END = "<<<SOURCE_EVIDENCE_END>>>";
+
+/**
+ * Reduce Limited Source Grounding experiment (PROTOTYPE ONLY, additive).
+ *
+ * A small, verbatim excerpt of original document text, attributed to the
+ * page it came from. Deliberately minimal — only `pageNumber` and `text`,
+ * never a full `AiContextChunk` — Reduce has no use for `chunkIndex` or
+ * character offsets, only the same page-attribution shape already used by
+ * `renderDocumentContextBlock` above.
+ */
+export interface ReduceSourceEvidence {
+  pageNumber: number;
+  text: string;
+}
+
+function renderSourceEvidenceBlock(evidence: ReduceSourceEvidence[]): string {
+  const body = evidence.map((item) => `[page ${item.pageNumber}]\n${item.text}`).join("\n\n");
+  return `${SOURCE_EVIDENCE_START}\n${body}\n${SOURCE_EVIDENCE_END}`;
+}
 
 export interface BuildReducePromptOptions {
   /** Intermediate Map-stage summaries, in batch order. */
   summaries: string[];
+  /**
+   * Optional (Reduce Limited Source Grounding experiment): a small set of
+   * verbatim source excerpts to ground Reduce against, rendered after the
+   * summaries as a delimited block with the evidence block's own
+   * explanatory wording (Evidence ON + Minimal Reduce experiment). Omitting
+   * this (the default) reproduces the earlier minimal Reduce prompt
+   * byte-for-byte.
+   */
+  sourceEvidence?: ReduceSourceEvidence[];
 }
 
 /**
@@ -181,26 +226,54 @@ export interface BuildReducePromptOptions {
  * data to be delimited (not as instructions), for the same reason
  * extracted document text is delimited in `renderDocumentContextBlock` —
  * see the prompt-injection-safety note at the top of this file.
+ *
+ * Evidence ON + Minimal Reduce experiment: the evidence payload is
+ * re-enabled by the caller and the evidence block's own explanatory
+ * wording (partial excerpt / authoritative for its text / absence is not
+ * evidence of absence) is restored verbatim from the grounding experiment.
+ * The GENERAL Reduce wording stays minimal: no preservation sentence and
+ * no unsupported-claims guard — those were not part of the evidence block.
  */
 export function buildReducePrompt(options: BuildReducePromptOptions): ChatMessage[] {
-  const { summaries } = options;
+  const { summaries, sourceEvidence } = options;
 
   if (summaries.length === 0) {
     throw new Error("Reduce received no intermediate summaries — nothing to combine.");
   }
+
+  // Reduce Limited Source Grounding experiment: an omitted/empty
+  // sourceEvidence renders no evidence block, and the prompt is then
+  // byte-for-byte the earlier minimal Reduce prompt.
+  const hasEvidence = sourceEvidence !== undefined && sourceEvidence.length > 0;
 
   const body = summaries
     .map((summary, index) => `[part ${index + 1}/${summaries.length}]\n${summary}`)
     .join("\n\n");
   const summariesBlock = `${INTERMEDIATE_SUMMARIES_START}\n${body}\n${INTERMEDIATE_SUMMARIES_END}`;
 
-  const userContent = [
+  const contentLines = [
     `Below are ${summaries.length} partial summaries of consecutive parts of the same document, in order.`,
     "Combine them into a single coherent overall summary of the whole document.",
     "Do not simply concatenate them, and do not repeat the part labels — synthesize one summary.",
-    "",
-    summariesBlock,
-  ].join("\n");
+  ];
+
+  if (hasEvidence) {
+    contentLines.push(
+      "The selected source evidence below is a small, partial excerpt from the original " +
+        "document. Use it to recover or verify important facts that may have been omitted from " +
+        "the partial summaries. Treat the source evidence as authoritative for the text it " +
+        "contains. Do not assume that information not shown in this excerpt is absent from the " +
+        "document.",
+    );
+  }
+
+  contentLines.push("", summariesBlock);
+
+  if (hasEvidence) {
+    contentLines.push("", renderSourceEvidenceBlock(sourceEvidence));
+  }
+
+  const userContent = contentLines.join("\n");
 
   return [
     { role: "system", content: PROTOTYPE_SYSTEM_INSTRUCTION },
