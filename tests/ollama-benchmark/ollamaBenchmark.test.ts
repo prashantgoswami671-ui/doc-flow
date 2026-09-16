@@ -440,8 +440,9 @@ describeBenchmark("Ollama T2-02 real-document benchmark (gated: RUN_OLLAMA_BENCH
       }
 
       records.forEach(expectSuccessfulRun);
-      // ~30k chars must fit the runtime's 32,768-character bound.
-      expect(records.every((r) => r.contextTruncated === false)).toBe(true);
+      // 20 dense pages (~39k chars) exceed the runtime's 32,768-character bound.
+      expect(records.every((r) => r.totalExtractedCharacters > 32768)).toBe(true);
+      expect(records.every((r) => r.contextTruncated === true)).toBe(true);
     },
   );
 

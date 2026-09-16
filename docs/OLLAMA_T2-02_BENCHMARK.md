@@ -64,22 +64,24 @@ Scenarios run by the file:
 |---|---|---|---|
 | 1 | real 6-page, intended COLD | the real PDF (skipped if absent) | 1 |
 | 1b | real 6-page, WARM | the real PDF | 3 |
-| 2 | synthetic dense 20-page WARM | generated in-file (~1.5k chars/page) | 3 |
-| 3 | synthetic dense 50-page WARM | generated in-file (~1.5k chars/page) | 3 |
+| 2 | synthetic dense 20-page WARM | generated in-file (~1.9–2.0k chars/page; ~39k chars total; exceeds the 32,768-character boundary) | 3 |
+| 3 | synthetic dense 50-page WARM | generated in-file (~1.9–2.0k chars/page; ~95k chars total) | 3 |
 | 4 | sparse 50-page control WARM | existing Phase 3.1 fixture | 1 |
 
 Fixed generation settings for comparability: `temperature 0.2`,
 `maxOutputTokens 1024` (within the runtime's 8,192-token `num_predict`
 ceiling).
 
-Why dense vs sparse synthetics: at ~1.5k chars/page the dense 20-page
-document (~30k chars) fits inside the runtime's 32,768-character context,
-while the dense 50-page document (~75k chars) exceeds it — the 50-page run
-records `contextTruncated: true` as the truncation-boundary data point. The
-sparse 50-page control (~10k chars) separates page-count effects from
-token-count effects. The sparse fixture's content is highly repetitive and
-**not suitable for quality evaluation** — quality review applies to the real
-PDF runs (and optionally the dense 20-page runs).
+Why dense vs sparse synthetics: the generated dense page text is
+approximately 1,900–2,000 characters per page. The dense 20-page document
+is therefore approximately 39,000 characters and intentionally exceeds the
+runtime's 32,768-character context boundary; each run should record
+`contextTruncated: true`. The dense 50-page document is approximately
+95,000 characters and also exceeds the boundary, providing a larger
+truncation case. The sparse 50-page control (~10k chars) separates page-count
+effects from token-count effects. The sparse fixture's content is highly
+repetitive and **not suitable for quality evaluation** — quality review
+applies to the real PDF runs (and optionally the dense 20-page runs).
 
 ## Cold/warm protocol (evidence-based)
 
