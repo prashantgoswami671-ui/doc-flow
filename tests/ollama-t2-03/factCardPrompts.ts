@@ -21,9 +21,18 @@ const CARD_JSON_SHAPE = `{
   "sourcePages": [<page>],
   "excerpts": ["<verbatim substring, >= 24 chars>", "..."],
   "definitions": [{"term": "...", "definition": "...", "excerpt": "<verbatim>"}],
-  "numbers": [{"value": "<verbatim, e.g. \\"84.78%\\">", "unit": "<verbatim or null>", "excerpt": "<verbatim containing value>"}],
+  "numbers": [{"value": "<verbatim, e.g. \\"84.78%\\">", "unit": "<string or null>", "excerpt": "<verbatim containing value>"}],
   "claims": [{"kind": "fact|comparison|conclusion", "text": "...", "excerpt": "<verbatim>", "excerpt2": "<verbatim, required for comparison>", "pages": [<page>], "causal": false, "causalExcerpt": null}]
 }`;
+
+const CARD_STRUCTURE_INSTRUCTIONS = `TOP-LEVEL STRUCTURE: output MUST be exactly ONE JSON object containing exactly these keys: cardId, chunkIndex, sourcePages, excerpts, definitions, numbers, claims. ` +
+  `ARRAY TYPES: sourcePages is an array of numbers; excerpts is an array of strings; definitions is an array of objects; numbers is an array of objects; claims is an array of objects. ` +
+  `NEVER use strings instead of objects for definitions, numbers, or claims. ` +
+  `DEFINITION OBJECT: every definitions[] entry must be an object with exactly term (string), definition (string), excerpt (string). ` +
+  `NUMBER OBJECT: every numbers[] entry must be an object with exactly value (string), unit (string or null), excerpt (string); the excerpt must be copied verbatim from the source chunk and must contain the exact value string. ` +
+  `CLAIM OBJECT: every claims[] entry must be an object with kind ("fact" | "comparison" | "conclusion"), text (string), excerpt (string), pages (array of numbers), causal (boolean); for comparison claims, excerpt2 is required and must be a second distinct verbatim source excerpt; for other claim kinds excerpt2 is optional (use null when absent). ` +
+  `VERBATIM EVIDENCE: COPY excerpts directly from the supplied document context. DO NOT paraphrase excerpts. DO NOT rewrite punctuation. DO NOT normalize numbers. DO NOT summarize an excerpt. DO NOT invent an excerpt. ` +
+  `NO INVENTED STRUCTURE: Do not add fields that are not part of the schema. Do not remove required fields. Do not replace arrays of objects with arrays of strings. Do not output an error object. Do not output explanatory prose. Output ONLY the single Fact Card JSON object.`;
 
 /**
  * Builds the per-chunk extraction prompt. The chunk text is NOT embedded
@@ -34,6 +43,7 @@ export function buildFactCardPrompt(chunkIndex: number, pageNumber: number): str
   return (
     `Extract a structured Fact Card for the document context below. ` +
     `Return ONLY a single JSON object with exactly this shape:\n${CARD_JSON_SHAPE}\n` +
+    `${CARD_STRUCTURE_INSTRUCTIONS} ` +
     `Rules: cardId must be "${expectedCardId(chunkIndex)}", chunkIndex must be ${chunkIndex}, ` +
     `sourcePages must be [${pageNumber}]. ` +
     `Every excerpt must be copied verbatim from the document context (at least 24 characters). ` +

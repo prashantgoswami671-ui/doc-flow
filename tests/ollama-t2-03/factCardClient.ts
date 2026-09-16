@@ -162,6 +162,8 @@ export async function extractFactCard(
   const baseUrl = options.baseUrl ?? OLLAMA_BASE_URL;
   const temperature = options.temperature ?? 0;
   const maxOutputTokens = options.maxOutputTokens ?? 1024;
+  // Truncation experiment (single variable): first-attempt budget only; repair keeps 1024.
+  const firstAttemptMaxOutputTokens = options.maxOutputTokens ?? 2048;
   const started = performance.now();
 
   const firstBody = {
@@ -169,7 +171,8 @@ export async function extractFactCard(
     prompt: `${buildFactCardPrompt(chunk.chunkIndex, chunk.pageNumber)}\n\n${renderContext(chunk)}`,
     stream: false,
     format: "json",
-    options: { temperature, num_predict: maxOutputTokens },
+    think: false,
+    options: { temperature, num_predict: firstAttemptMaxOutputTokens },
   };
   const first = await postGenerate(fetchImpl, baseUrl, firstBody);
   const firstAttempt = tryParseAndValidate(first.response, chunk, sourcePageCount);
@@ -193,6 +196,7 @@ export async function extractFactCard(
     prompt: `${buildFactCardRepairPrompt(firstAttempt.reasons.join("; "))}\n\n${renderContext(chunk)}`,
     stream: false,
     format: "json",
+    think: false,
     options: { temperature: 0, num_predict: maxOutputTokens },
   };
   const repair = await postGenerate(fetchImpl, baseUrl, repairBody);

@@ -119,7 +119,21 @@ describePoc("Ollama T2-03 Fact Card PoC (gated: RUN_OLLAMA_T203=1)", () => {
 
       // 2. One card per chunk (PoC-local format:"json" client, ≤1 repair).
       const accepted: FactCard[] = [];
-      const rejected: { chunkIndex: number; reasons: string[] }[] = [];
+      // Forensic instrumentation (T2-03 only): for each rejected chunk persist
+      // what Qwen3 4B actually returned. rawOutput = first-attempt raw
+      // response; repairRawOutput = single repair-attempt raw response (null
+      // when N/A); inputTokens/outputTokens = whatever extractFactCard
+      // reported (null when unavailable on rejected chunks); generationMs =
+      // total generation duration. Full raws stay in JSON only, never console.
+      const rejected: {
+        chunkIndex: number;
+        reasons: string[];
+        rawOutput: string | null;
+        repairRawOutput: string | null;
+        inputTokens: number | null;
+        outputTokens: number | null;
+        generationMs: number;
+      }[] = [];
       let firstTryValid = 0;
       let repaired = 0;
       let failures = 0;
@@ -147,10 +161,26 @@ describePoc("Ollama T2-03 Fact Card PoC (gated: RUN_OLLAMA_T203=1)", () => {
             if (check.ok) {
               accepted.push(result.card);
             } else {
-              rejected.push({ chunkIndex: chunk.chunkIndex, reasons: check.reasons });
+              rejected.push({
+                chunkIndex: chunk.chunkIndex,
+                reasons: check.reasons,
+                rawOutput: result.rawOutput,
+                repairRawOutput: result.repairRawOutput,
+                inputTokens: result.inputTokens,
+                outputTokens: result.outputTokens,
+                generationMs: result.generationMs,
+              });
             }
           } else {
-            rejected.push({ chunkIndex: chunk.chunkIndex, reasons: result.reasons });
+            rejected.push({
+              chunkIndex: chunk.chunkIndex,
+              reasons: result.reasons,
+              rawOutput: result.rawOutput,
+              repairRawOutput: result.repairRawOutput,
+              inputTokens: result.inputTokens,
+              outputTokens: result.outputTokens,
+              generationMs: result.generationMs,
+            });
           }
         } catch (error) {
           failures += 1;
