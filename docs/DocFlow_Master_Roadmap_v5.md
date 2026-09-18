@@ -1,4 +1,5 @@
 # DocFlow — Master Product Roadmap (v5)
+**Status: SUPERSEDED by Roadmap v6.** This document reflects the project state at the time of writing (2026-08-27) and contains stale provider-status claims (e.g., "no provider implemented" at Checkpoint 1) that no longer match the audited repository baseline. See `docs/DocFlow_Master_Roadmap_v6.md` for the current execution source of truth. Do not treat v5 as current for implementation decisions.
 Single source of truth • Revision date: 2026-08-27 (revision 4 — adds AI Document Intelligence phase; supersedes v4)
 
 **Vision:** A privacy-first PDF workspace with local/self-hosted AI — not a PDF utility site with some AI buttons bolted on.
