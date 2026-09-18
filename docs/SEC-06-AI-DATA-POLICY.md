@@ -1,14 +1,19 @@
 # SEC-06 — AI Data Security & Privacy Policy
-Status: **Approved policy document, amended by SEC-07.** SEC-07 (Checkpoint 1) added the Tier 1 Browser AI category, the three-tier architecture framing, and the BYOK policy decision in §3 — see the "Amended by SEC-07" note there. AI-01/AI-02 foundation code now exists (`services/ai/`); no provider (Browser AI, Ollama, BYOK, Cloud) is implemented yet.
-Source: `SEC-06 Read-Only Audit` (read-only inspection of the repository, no code modified), amended per the approved Checkpoint 1 architecture (SEC-07).
+Status: **Approved policy document, amended by SEC-07.** SEC-07 (Checkpoint 1) added the Tier 1 Browser AI category, the three-tier architecture framing, and the BYOK policy decision in §3 — see the "Amended by SEC-07" note there. AI-01/AI-02 foundation code exists (`services/ai/`). As of the 2026-09-18 audit reconciliation:
+- **Browser AI (Tier 1)** is implemented and **production-integrated** (wired to the Summarize PDF UI at `/tools/summarize-pdf`).
+- **Ollama (Tier 2)** runtime implementation exists (`services/ai/ollama/`) and is unit-tested, but is **not production-wired** — no provider-selection UI, no consent/disclosure flow (§6/§7) implemented, not reachable from any production UI.
+- **BYOK (Tier 3)** and **Cloud AI** are not implemented.
+Source: `SEC-06 Read-Only Audit` (read-only inspection of the repository, no code modified), amended per the approved Checkpoint 1 architecture (SEC-07) and reconciled against the 2026-09-18 full repository audit.
 This is the authoritative reference for Phase 5 (`AI-01` onward) in `docs/DOCFLOW_STATUS.md`. Any future AI implementation must conform to this document. Do not begin an actual provider implementation until this policy is reviewed against the chosen provider/deployment and re-confirmed still accurate.
 
 ---
 
-## 0. Current reality (as of this policy's approval)
+## 0. Current reality (as of 2026-09-18 audit reconciliation)
 
-Production DocFlow, today, has:
-- No production AI pipeline, AI server, remote AI provider, or Ollama integration.
+Production DocFlow has:
+- **Browser AI (Tier 1) runtime** — implemented and production-integrated. Model `onnx-community/Qwen2.5-0.5B-Instruct` q4 via `@huggingface/transformers` 4.2.0, running in a Web Worker on WASM (WebGPU pinned off). Wired to the Summarize PDF tool (`/tools/summarize-pdf`). Inference executes locally in the browser; no extracted text leaves the browser in this mode.
+- **Ollama (Tier 2) runtime implementation** — exists at `services/ai/ollama/` (`runtime.ts`, `client.ts`, `types.ts`). Fully implements the `AiRuntime` contract against fixed endpoint `http://127.0.0.1:11434` and model `qwen3:4b`. Unit-tested. **Not reachable from any production UI** — no provider-selection UI, no consent/disclosure flow (§6/§7) implemented. `capabilities.requiresConsent = true` is set but the consent UI does not exist.
+- **BYOK (Tier 3)** and **Cloud AI** — not implemented.
 - No AI API key used by browser code or by a production server (no production server exists).
 - All PDF processing client-side, in browser memory (`File`, `ArrayBuffer`, PDF.js, `pdf-lib`, canvas, `Blob`, object URLs).
 - One production third-party network path: the Fix Page Orientation OCR fallback, which downloads Tesseract worker/core/language assets from jsDelivr. The rendered page image and OCR text stay local and are not uploaded.
