@@ -251,4 +251,47 @@ describe("network egress regression guard (pre-Phase-5 hardening)", () => {
       { file: "services/ai/ollama/types.ts", match: "http://127.0.0.1:11434" },
     ]);
   });
+
+  // V6-F04 — the Ollama module must carry no binary document payload:
+  // no File/Blob/ArrayBuffer/Uint8Array plumbing, no page images or
+  // thumbnails, no passwords, no metadata fields, no FileReader usage.
+  // The Tier-2 transport may only send extracted-text prompts plus the
+  // structured-output configuration (proven at runtime by the D02/D04
+  // unit tests); this static test fails any future change that threads
+  // original PDF bytes, images, or document metadata toward Ollama.
+  // (Case-sensitive on purpose: the Ollama API's own `modelfile` field
+  // must not trip this guard.)
+  it("carries no binary document payload identifiers in the Ollama module", () => {
+    const ollamaFiles = sourceFiles.filter((filePath) =>
+      toRepoRelativePath(filePath).startsWith("services/ai/ollama/"),
+    );
+    expect(ollamaFiles.length).toBeGreaterThan(0);
+
+    const payloadPatterns = [
+      /\bFile\b/,
+      /\bBlob\b/,
+      /ArrayBuffer/,
+      /Uint8Array/,
+      /pageImage/,
+      /thumbnail/,
+      /password/i,
+      /metadata/,
+      /readAs[A-Z]/,
+    ];
+    const offenders: string[] = [];
+    for (const filePath of ollamaFiles) {
+      const content = stripComments(readFileSync(filePath, "utf-8"));
+      const hits = payloadPatterns
+        .filter((pattern) => pattern.test(content))
+        .map((pattern) => String(pattern));
+      if (hits.length > 0) {
+        offenders.push(`${toRepoRelativePath(filePath)} (${hits.join(", ")})`);
+      }
+    }
+    expect(
+      offenders,
+      `Binary document payload identifiers found in the Ollama module: ${offenders.join("; ")}. ` +
+        `Only extracted-text prompts and structured-output configuration may reach Ollama (SEC-06).`,
+    ).toEqual([]);
+  });
 });
