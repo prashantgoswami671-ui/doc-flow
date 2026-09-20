@@ -46,10 +46,29 @@ export interface OllamaGenerateRequest {
   model: string;
   prompt: string;
   stream: false;
+  /** Thinking control (V6-F02: `false` for structured Stage-1/Stage-2 calls). */
+  think?: boolean;
+  /** Structured-output JSON Schema object (never the bare `"json"` mode). */
+  format?: OllamaJsonSchema;
   options?: {
     temperature?: number;
     num_predict?: number;
   };
+}
+
+/**
+ * Provider-local JSON Schema representation for Ollama structured
+ * outputs (`format`). Object-only by design: the experiment showed
+ * bare `"json"` mode is insufficient for the frozen Stage-1/Stage-2
+ * contracts on this setup.
+ */
+export interface OllamaJsonSchema {
+  readonly type: "array" | "object" | "string" | "number" | "boolean" | "integer";
+  readonly items?: OllamaJsonSchema;
+  readonly properties?: Readonly<Record<string, OllamaJsonSchema>>;
+  readonly required?: readonly string[];
+  readonly additionalProperties?: boolean;
+  readonly enum?: readonly string[];
 }
 
 export interface OllamaGenerateResponse {

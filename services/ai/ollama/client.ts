@@ -9,6 +9,7 @@
 import type {
   OllamaGenerateRequest,
   OllamaGenerateResponse,
+  OllamaJsonSchema,
   OllamaTagsResponse,
   OllamaShowResponse,
 } from "./types";
@@ -59,6 +60,21 @@ export class OllamaModelNotFoundError extends OllamaClientError {
     this.name = "OllamaModelNotFoundError";
     this.model = model;
   }
+}
+
+/**
+ * Structured availability result (provider-local, V6-D02).
+ *
+ * Extends the generic `{ available, reason }` shape with an explicit
+ * `modelMissing` flag so later layers can distinguish "service
+ * unreachable" from "service reachable but the configured model is
+ * absent" without parsing the human-readable `reason` string.
+ */
+export interface OllamaAvailabilityResult {
+  available: boolean;
+  reason?: string;
+  /** True only when the service answered but the configured model is absent. */
+  modelMissing?: boolean;
 }
 
 /** Error thrown when generation fails after model was confirmed available. */
@@ -124,15 +140,29 @@ export function buildOllamaPrompt(
  * Both send the identical wire request; generateDetailed only surfaces
  * the metric fields Ollama already returns with the response.
  */
+/**
+ * Provider-local transport overrides for structured generation
+ * (V6-F02). `think: false` keeps reasoning out of the response;
+ * `format` carries a JSON Schema object constraining the output
+ * shape. Both are omitted from the wire body unless explicitly set.
+ */
+export interface OllamaTransportOptions {
+  think?: boolean;
+  format?: OllamaJsonSchema;
+}
+
 function buildGenerateRequestBody(
   prompt: string,
   contextChunks?: { text: string; pageNumber: number; chunkIndex: number }[],
   settings?: { temperature?: number; maxOutputTokens?: number },
+  transport?: OllamaTransportOptions,
 ): OllamaGenerateRequest {
   return {
     model: OLLAMA_MODEL,
     prompt: buildOllamaPrompt(prompt, contextChunks),
     stream: false,
+    ...(transport?.think !== undefined ? { think: transport.think } : {}),
+    ...(transport?.format !== undefined ? { format: transport.format } : {}),
     options: {
       temperature: settings?.temperature ?? OLLAMA_DEFAULT_TEMPERATURE,
       num_predict: settings?.maxOutputTokens ?? OLLAMA_DEFAULT_MAX_TOKENS,
@@ -201,7 +231,7 @@ export function createOllamaClient(options: OllamaClientOptions = {}): OllamaCli
      * Checks if Ollama is reachable and the configured model is available.
      * Calls /api/tags to list models.
      */
-    async checkAvailability(): Promise<{ available: boolean; reason?: string }> {
+    async checkAvailability(): Promise<OllamaAvailabilityResult> {
       try {
         const tags = await request<OllamaTagsResponse>(OLLAMA_API_TAGS);
         const hasModel = tags.models.some((m) => m.name === OLLAMA_MODEL || m.model === OLLAMA_MODEL);
@@ -209,6 +239,7 @@ export function createOllamaClient(options: OllamaClientOptions = {}): OllamaCli
           return {
             available: false,
             reason: `Model "${OLLAMA_MODEL}" not found in Ollama. Run: ollama pull ${OLLAMA_MODEL}`,
+            modelMissing: true,
           };
         }
         return { available: true };
@@ -231,8 +262,9 @@ export function createOllamaClient(options: OllamaClientOptions = {}): OllamaCli
       prompt: string,
       contextChunks?: { text: string; pageNumber: number; chunkIndex: number }[],
       settings?: { temperature?: number; maxOutputTokens?: number },
+      transport?: OllamaTransportOptions,
     ): Promise<string> {
-      const requestBody = buildGenerateRequestBody(prompt, contextChunks, settings);
+      const requestBody = buildGenerateRequestBody(prompt, contextChunks, settings, transport);
 
       try {
         const response = await request<OllamaGenerateResponse>(OLLAMA_API_GENERATE, {
@@ -301,11 +333,12 @@ export function createOllamaClient(options: OllamaClientOptions = {}): OllamaCli
 }
 
 export interface OllamaClient {
-  checkAvailability(): Promise<{ available: boolean; reason?: string }>;
+  checkAvailability(): Promise<OllamaAvailabilityResult>;
   generate(
     prompt: string,
     contextChunks?: { text: string; pageNumber: number; chunkIndex: number }[],
     settings?: { temperature?: number; maxOutputTokens?: number },
+    transport?: OllamaTransportOptions,
   ): Promise<string>;
   generateDetailed(
     prompt: string,

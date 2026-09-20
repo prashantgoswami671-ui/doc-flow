@@ -13,6 +13,7 @@ import type {
   AiAvailability,
   AiCapabilities,
   AiContextChunk,
+  AiRequestSettings,
   AiRuntime,
   AiTextGenerationRequest,
   AiTextGenerationResult,
@@ -25,6 +26,7 @@ import {
   OLLAMA_MAX_OUTPUT_CHARACTERS,
   OLLAMA_MAX_OUTPUT_TOKENS,
   OLLAMA_PROVIDER_ID,
+  type OllamaJsonSchema,
 } from "./types";
 import {
   OllamaClientError,
@@ -167,6 +169,48 @@ export class OllamaRuntime implements AiRuntime {
   dispose(): void {
     this.disposed = true;
     this.client = null;
+  }
+
+  /**
+   * Provider-specific structured generation for the frozen Stage-1 /
+   * Stage-2 contracts (V6-F02). Always sends `think: false` with the
+   * caller-supplied JSON Schema `format` — the experimentally validated
+   * transport shape for this setup. No document context is attached;
+   * the prompt already carries the evidence pool. Availability gating
+   * is the caller's job (D04/E01 acquire a gated runtime first), so no
+   * availability re-check happens here.
+   */
+  async generateStructuredText(options: {
+    prompt: string;
+    format: OllamaJsonSchema;
+    settings?: AiRequestSettings;
+  }): Promise<string> {
+    if (this.disposed) {
+      throw new OllamaRuntimeDisposedError();
+    }
+    if (this.inFlight) {
+      throw new Error("Ollama runtime supports one in-flight generation at a time.");
+    }
+    if (typeof options.prompt !== "string" || options.prompt.length === 0) {
+      throw new Error("Structured generation requires a non-empty prompt.");
+    }
+    this.inFlight = true;
+    try {
+      if (!this.client) {
+        this.client = this.clientFactory();
+      }
+      return await this.client.generate(
+        options.prompt,
+        undefined,
+        {
+          temperature: options.settings?.temperature,
+          maxOutputTokens: options.settings?.maxOutputTokens,
+        },
+        { think: false, format: options.format },
+      );
+    } finally {
+      this.inFlight = false;
+    }
   }
 
   async generateText(
