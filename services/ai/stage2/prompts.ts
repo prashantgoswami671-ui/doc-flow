@@ -28,7 +28,10 @@ const STAGE1_INSTRUCTION =
   "Return ONLY a JSON array of strings, where each string is copied " +
   "character-for-character from the chunk. " +
   "Rules: identify useful exact source spans; copy them exactly with no " +
-  "rewording; return only the array; do not explain, classify, or " +
+  "rewording; return at least 3 independently useful exact spans when " +
+  "the chunk contains more than two useful facts; prefer distinct spans " +
+  "over duplicate copies; if fewer useful spans exist, return only those; " +
+  "return only the array; do not explain, classify, or " +
   "comment on the spans; do not invent IDs, page numbers, values, or " +
   "metadata; do not add surrounding commentary. " +
   'Example output: ["The exact source span...", "Another exact source span..."].';

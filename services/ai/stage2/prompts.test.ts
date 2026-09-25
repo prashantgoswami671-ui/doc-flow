@@ -29,6 +29,23 @@ describe("buildStage1EvidencePrompt", () => {
     expect(() => buildStage1EvidencePrompt(null)).toThrow(Stage2PromptError);
     expect(() => buildStage1EvidencePrompt(42)).toThrow(Stage2PromptError);
   });
+
+  it("requests multiple independently useful spans (V7-A10 RED3)", () => {
+    const prompt = buildStage1EvidencePrompt("some text").toLowerCase();
+    expect(prompt).toContain("at least 3 independently useful exact spans");
+  });
+
+  it("prefers distinct spans and keeps three spans non-mandatory", () => {
+    const prompt = buildStage1EvidencePrompt("some text").toLowerCase();
+    expect(prompt).toContain("prefer distinct spans over duplicate copies");
+    expect(prompt).toContain("if fewer useful spans exist, return only those");
+  });
+
+  it("still requires exact verbatim reproduction alongside redundancy", () => {
+    const prompt = buildStage1EvidencePrompt("some text").toLowerCase();
+    expect(prompt).toContain("copied character-for-character");
+    expect(prompt).toContain("with no rewording");
+  });
 });
 
 describe("buildStage2SummarizePrompt", () => {
