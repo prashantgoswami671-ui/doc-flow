@@ -11,7 +11,8 @@
  *        JSON array of exact-span strings; never mints IDs)
  *     → B03 admission per chunk into one B04 EvidenceStore
  *        (exact containment, local IDs, deterministic numerics)
- *     → deterministic evidence budget (first-N admission order)
+ *     → deterministic evidence budget (coverage-balanced page
+ *        spread, V7-A02)
  *     → frozen C01 Stage2Input (no provenance, no raw chunk text)
  *     → Stage-2 summarization generation (evidence pool only)
  *     → C02 validation (invalid claims rejected, siblings survive)
@@ -28,6 +29,7 @@ import { buildAiTextContext } from "./pipeline";
 import { AiEmptyContextError } from "./orchestration";
 import { EvidenceStore } from "./evidence/store";
 import type { EvidenceItem } from "./evidence/types";
+import { selectCoverageBalancedEvidence } from "./evidence/selection";
 import { validateStage2Output } from "./stage2/validation";
 import { projectGroundedClaims, type GroundedStage2Claim } from "./stage2/projection";
 import { generateStage1SpansText, generateStage2ClaimsText } from "./ollama/structured";
@@ -38,12 +40,15 @@ import { Tier2ServiceError, acquireGatedOllamaRuntime } from "./tier2";
 export { Tier2ServiceError } from "./tier2";
 
 /**
- * Deterministic bound on evidence projected into Stage 2 (admission
- * order, whole items only). Conservative for local qwen3:4b: keeps the
- * Stage-2 prompt compact with headroom for the 2048-token output
- * ceiling (T2-07 showed added context risks truncation), while the
- * chunk-2 stress case (18 spans) fits without budgeting. Overflow is
- * flagged via `evidenceTruncated`, never silently dropped.
+ * Deterministic bound on evidence projected into Stage 2
+ * (coverage-balanced selection, whole items only). Conservative for
+ * local qwen3:4b: keeps the Stage-2 prompt compact with headroom for
+ * the 2048-token output ceiling (T2-07 showed added context risks
+ * truncation), while the chunk-2 stress case (18 spans) fits without
+ * budgeting. Overflow is flagged via `evidenceTruncated`, never
+ * silently dropped. V7-A02: the pool is spread across source pages
+ * instead of taking the first-N admitted items, so trailing pages
+ * are no longer deterministically excluded.
  */
 export const MAX_STAGE2_EVIDENCE_ITEMS = 24;
 
@@ -189,11 +194,13 @@ export async function runTier2ValidatedSummarize(
       );
     }
 
-    // Deterministic evidence budget: first-N admission order, whole
-    // items only; the store itself is never mutated or sliced.
+    // Deterministic evidence budget: coverage-balanced selection
+    // across source pages (V7-A02), whole items only, at most
+    // MAX_STAGE2_EVIDENCE_ITEMS; the store itself is never mutated
+    // or sliced.
     const snapshot = store.snapshot();
     const evidenceTruncated = snapshot.length > MAX_STAGE2_EVIDENCE_ITEMS;
-    const budgeted = evidenceTruncated ? snapshot.slice(0, MAX_STAGE2_EVIDENCE_ITEMS) : snapshot;
+    const budgeted = selectCoverageBalancedEvidence(snapshot, MAX_STAGE2_EVIDENCE_ITEMS);
     const stage2Input: Stage2Input = Object.freeze({
       evidence: Object.freeze(budgeted.map(toEvidenceView)),
       task: "summarize" as const,
