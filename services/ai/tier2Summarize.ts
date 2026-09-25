@@ -96,15 +96,26 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Projects one admitted store item to its model-visible view. The
+ * descriptive `sourcePage` / `chunk` locators come from the item's own
+ * authoritative `sourcePages` / `chunkIndex` (v1: exactly the owning
+ * page) — never from model output, never modified, never re-derived.
+ * The store item itself is untouched.
+ */
 function toEvidenceView(item: EvidenceItem): Stage2EvidenceView {
+  const sourcePage = item.sourcePages[0] as number;
+  const chunk = item.chunkIndex;
   return Object.freeze(
     item.value === undefined
-      ? { evidenceId: item.evidenceId, exactText: item.exactText, kind: item.kind }
+      ? { evidenceId: item.evidenceId, exactText: item.exactText, kind: item.kind, sourcePage, chunk }
       : {
           evidenceId: item.evidenceId,
           exactText: item.exactText,
           kind: item.kind,
           value: item.value,
+          sourcePage,
+          chunk,
         },
   );
 }
@@ -204,6 +215,7 @@ export async function runTier2ValidatedSummarize(
     const stage2Input: Stage2Input = Object.freeze({
       evidence: Object.freeze(budgeted.map(toEvidenceView)),
       task: "summarize" as const,
+      sourcePageCount: context.sourcePageCount,
     });
 
     // Stage 2: evidence-pool-only generation, then C02 validation.

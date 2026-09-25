@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildTextVectorPdfBytes, toFile } from "../pdf/__fixtures__/pdf";
 import { createAiConsentStore, grantAiConsent } from "./consent";
 import { OLLAMA_MODEL, OLLAMA_PROVIDER_ID } from "./ollama/types";
+import { buildStage2SummarizePrompt } from "./stage2/prompts";
 import { Tier2ServiceError } from "./tier2";
 import {
   MAX_STAGE2_EVIDENCE_ITEMS,
@@ -306,8 +307,13 @@ describe("STAGE-2 INPUT + OUTPUT", () => {
     expect(pool.length).toBeGreaterThan(0);
     for (const view of pool) {
       expect(Object.keys(view).sort()).toEqual(
-        (view["value"] === undefined ? ["evidenceId", "exactText", "kind"] : ["evidenceId", "exactText", "kind", "value"]).sort(),
+        (view["value"] === undefined
+          ? ["evidenceId", "exactText", "kind", "sourcePage", "chunk"]
+          : ["evidenceId", "exactText", "kind", "value", "sourcePage", "chunk"]
+        ).sort(),
       );
+      expect(typeof view["sourcePage"]).toBe("number");
+      expect(typeof view["chunk"]).toBe("number");
     }
     expect(capturedPool).not.toContain("sourcePages");
     expect(capturedPool).not.toContain("chunkIndex");
@@ -442,6 +448,36 @@ describe("COVERAGE-BALANCED SELECTION (V7-A02)", () => {
     expect(result.evidenceTruncated).toBe(false);
     expect(captured.pool).toHaveLength(result.evidenceAdmitted);
   });
+
+  it("48. Stage2Input shape is unchanged under balancing", async () => {
+    const captured: { pool: Array<Record<string, unknown>> } = { pool: [] };
+    stubOllamaFetch({
+      stage1: (_callIndex, chunkText) => JSON.stringify(sliceSpans(chunkText, 40)),
+      stage2: (pool) => {
+        captured.pool = pool as Array<Record<string, unknown>>;
+        return JSON.stringify([
+          { kind: "fact", text: "Point.", evidenceIds: [pool[0]?.evidenceId] },
+        ]);
+      },
+    });
+    const result = await runTier2ValidatedSummarize({
+      file: await testPdfFile(3),
+      consentStore: grantedStore(),
+    });
+    expect(result.status).toBe("grounded");
+    expect(captured.pool.length).toBeLessThanOrEqual(MAX_STAGE2_EVIDENCE_ITEMS);
+    for (const view of captured.pool) {
+      expect(Object.keys(view).sort()).toEqual(
+        (view["value"] === undefined
+          ? ["evidenceId", "exactText", "kind", "sourcePage", "chunk"]
+          : ["evidenceId", "exactText", "kind", "value", "sourcePage", "chunk"]
+        ).sort(),
+      );
+    }
+    expect(JSON.stringify(captured.pool)).not.toContain("sourcePages");
+    expect(JSON.stringify(captured.pool)).not.toContain("chunkIndex");
+  });
+
   it("49. store stays immutable and C02/C03 behave as before", async () => {
     const captured: { pool: Array<{ evidenceId: string }> } = { pool: [] };
     overBudgetStub(captured);
@@ -461,6 +497,118 @@ describe("COVERAGE-BALANCED SELECTION (V7-A02)", () => {
         expect(g.chunk.text.includes(g.item.exactText)).toBe(true);
       }
     }
+  });
+});
+
+describe("PAGE-AWARE STAGE-2 CONTRACT (V7-A04)", () => {
+  function chunkIndexOf(evidenceId: string): number {
+    return Number(evidenceId.split("-")[1]);
+  }
+
+  it("50. views carry store-sourced page/chunk locators", async () => {
+    const captured: { pool: Array<Record<string, unknown>> } = { pool: [] };
+    stubOllamaFetch({
+      stage2: (pool) => {
+        captured.pool = pool as Array<Record<string, unknown>>;
+        return JSON.stringify([
+          { kind: "fact", text: "Point.", evidenceIds: [pool[0]?.evidenceId] },
+        ]);
+      },
+    });
+    const result = await runTier2ValidatedSummarize({
+      file: await testPdfFile(3),
+      consentStore: grantedStore(),
+    });
+    expect(result.status).toBe("grounded");
+    expect(captured.pool.length).toBeGreaterThan(0);
+    for (const view of captured.pool) {
+      const chunk = chunkIndexOf(view["evidenceId"] as string);
+      // One chunk per fixture page: store-sourced locators must agree.
+      expect(view["chunk"]).toBe(chunk);
+      expect(view["sourcePage"]).toBe(chunk + 1);
+    }
+  });
+
+  it("51. prompt renders locators plus the page denominator", async () => {
+    const captured: { pool: Array<Record<string, unknown>> } = { pool: [] };
+    stubOllamaFetch({
+      stage2: (pool) => {
+        captured.pool = pool as Array<Record<string, unknown>>;
+        return JSON.stringify([
+          { kind: "fact", text: "Point.", evidenceIds: [pool[0]?.evidenceId] },
+        ]);
+      },
+    });
+    const result = await runTier2ValidatedSummarize({
+      file: await testPdfFile(3),
+      consentStore: grantedStore(),
+    });
+    expect(result.status).toBe("grounded");
+    const prompt = buildStage2SummarizePrompt({
+      evidence: captured.pool,
+      task: "summarize",
+      sourcePageCount: 3,
+    });
+    expect(prompt).toContain('"sourcePage"');
+    expect(prompt).toContain('"chunk"');
+    expect(prompt).not.toContain('"page":');
+    expect(prompt).toContain("(3 pages)");
+    expect(prompt).toContain('"evidenceIds"');
+  });
+
+  it("52. model-emitted sourcePage/chunk claim fields are still rejected", async () => {
+    stubOllamaFetch({
+      stage2: (pool) =>
+        JSON.stringify([
+          {
+            kind: "fact",
+            text: "T.",
+            evidenceIds: [pool[0]?.evidenceId],
+            sourcePage: 1,
+            chunk: 0,
+            sourcePageCount: 3,
+          },
+        ]),
+    });
+    const result = await runTier2ValidatedSummarize({
+      file: await testPdfFile(),
+      consentStore: grantedStore(),
+    });
+    expect(result.status).toBe("limited");
+    expect(result.reason).toBe("no-valid-claims");
+    expect(result.claims).toEqual([]);
+  });
+
+  it("53. V7-A02 balanced selection stays active under the new contract", async () => {
+    async function runOverBudget(): Promise<{
+      poolIds: string[];
+      result: Awaited<ReturnType<typeof runTier2ValidatedSummarize>>;
+    }> {
+      const captured: { pool: Array<{ evidenceId: string }> } = { pool: [] };
+      stubOllamaFetch({
+        stage1: (_callIndex, chunkText) => JSON.stringify(sliceSpans(chunkText, 40)),
+        stage2: (pool) => {
+          captured.pool = pool;
+          return JSON.stringify([
+            { kind: "fact", text: "Point.", evidenceIds: [pool[0]?.evidenceId] },
+          ]);
+        },
+      });
+      const result = await runTier2ValidatedSummarize({
+        file: await testPdfFile(3),
+        consentStore: grantedStore(),
+      });
+      return { poolIds: captured.pool.map((p) => p.evidenceId), result };
+    }
+    const first = await runOverBudget();
+    const second = await runOverBudget();
+    expect(first.result.evidenceAdmitted).toBeGreaterThan(MAX_STAGE2_EVIDENCE_ITEMS);
+    expect(first.result.evidenceTruncated).toBe(true);
+    expect(first.poolIds).toHaveLength(MAX_STAGE2_EVIDENCE_ITEMS);
+    const chunks = new Set(first.poolIds.map(chunkIndexOf));
+    expect(chunks).toEqual(new Set([0, 1, 2]));
+    expect(second.poolIds).toEqual(first.poolIds);
+    expect(first.result.status).toBe("grounded");
   });
 });
 

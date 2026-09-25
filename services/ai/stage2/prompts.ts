@@ -10,7 +10,11 @@
  *   The model never mints IDs, pages, kinds, values, or commentary.
  * - Stage 2 reasons over trusted `Stage2Input` evidence only and must
  *   emit exactly the frozen `Stage2Claim` schema (IDs cited, never
- *   copied text). No raw document context is included.
+ *   copied text). No raw document context is included. V7-A04: each
+ *   evidence entry additionally carries descriptive `sourcePage` /
+ *   `chunk` locators (plus the document `sourcePageCount`) for coverage
+ *   awareness — context only, never claim fields. (V7-A04.2: named
+ *   `sourcePage`, not `page`, per the V7-A04.1 stability finding.)
  */
 
 import type { Stage2Input } from "./types";
@@ -49,10 +53,15 @@ export function buildStage1EvidencePrompt(chunkText: unknown): string {
 
 const STAGE2_INSTRUCTION =
   "Reason over the trusted evidence below and produce concise summary claims. " +
+  "The pool holds selected document evidence; each entry carries descriptive " +
+  "sourcePage (source page number) and chunk locators so the summary can cover the " +
+  "whole document broadly — avoid concentrating the entire summary on one page " +
+  "when evidence from other pages is available. " +
   "Rules: every claim must cite one or more supplied evidenceIds, copied " +
   "exactly character-for-character from the evidence pool; never invent an " +
   "ID; never emit source excerpts, exact text, pages, values, or units as " +
-  "claim fields; claim text is your own concise restatement, never presented " +
+  "claim fields; sourcePage and chunk locators are context only and must never " +
+  "appear as claim fields; claim text is your own concise restatement, never presented " +
   "as source wording; produce ONLY a JSON array of claims with exactly " +
   'these keys: {"kind": "fact" | "conclusion", "text": "...", ' +
   '"evidenceIds": ["..."]}; do not request or perform comparison, ' +
@@ -62,12 +71,15 @@ function assertValidStage2Input(input: unknown): asserts input is Stage2Input {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     throw new Stage2PromptError("Stage-2 prompt requires a Stage2Input object.");
   }
-  const { evidence, task } = input as Record<string, unknown>;
+  const { evidence, task, sourcePageCount } = input as Record<string, unknown>;
   if (!Array.isArray(evidence) || evidence.length === 0) {
     throw new Stage2PromptError("Stage-2 prompt requires non-empty evidence.");
   }
   if (task !== "summarize") {
     throw new Stage2PromptError("Stage-2 prompt supports the summarize task only.");
+  }
+  if (!Number.isSafeInteger(sourcePageCount) || (sourcePageCount as number) < 1) {
+    throw new Stage2PromptError("Stage-2 prompt requires a positive sourcePageCount.");
   }
   for (const [index, item] of evidence.entries()) {
     if (typeof item !== "object" || item === null || Array.isArray(item)) {
@@ -77,13 +89,24 @@ function assertValidStage2Input(input: unknown): asserts input is Stage2Input {
     if (typeof view["evidenceId"] !== "string" || typeof view["exactText"] !== "string") {
       throw new Stage2PromptError(`Stage-2 evidence[${index}] is malformed.`);
     }
+    // Descriptive coverage locators (V7-A04, renamed V7-A04.2):
+    // shape-checked here, sourced authoritatively upstream — never
+    // trusted from the model.
+    if (!Number.isSafeInteger(view["sourcePage"]) || (view["sourcePage"] as number) < 1) {
+      throw new Stage2PromptError(`Stage-2 evidence[${index}] needs a positive sourcePage.`);
+    }
+    if (!Number.isSafeInteger(view["chunk"]) || (view["chunk"] as number) < 0) {
+      throw new Stage2PromptError(`Stage-2 evidence[${index}] needs a chunk index.`);
+    }
   }
 }
 
 /**
  * Builds the Stage-2 summarization prompt from frozen `Stage2Input`.
- * Serializes the evidence views (ID + exact text + kind + value only —
- * no provenance, no raw chunk text) followed by the claim contract.
+ * Serializes the evidence views (ID + exact text + kind + value +
+ * descriptive sourcePage/chunk locators only — no provenance arrays, no raw
+ * chunk text) followed by the claim contract and the document page
+ * denominator.
  */
 export function buildStage2SummarizePrompt(input: unknown): string {
   assertValidStage2Input(input);
@@ -97,10 +120,12 @@ export function buildStage2SummarizePrompt(input: unknown): string {
     if (typeof view["value"] === "string") {
       projected["value"] = view["value"];
     }
+    projected["sourcePage"] = view["sourcePage"];
+    projected["chunk"] = view["chunk"];
     return projected;
   });
   return (
     `${STAGE2_INSTRUCTION}\n\nTrusted evidence pool:\n${JSON.stringify(pool)}\n\n` +
-    `Task: ${input.task}`
+    `Task: ${input.task} (${input.sourcePageCount} pages)`
   );
 }

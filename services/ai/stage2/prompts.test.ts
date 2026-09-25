@@ -52,10 +52,11 @@ describe("buildStage2SummarizePrompt", () => {
   function validInput() {
     return {
       evidence: [
-        { evidenceId: "chunk-0-e0", exactText: "rural literacy is just 61.11%", kind: "number", value: "61.11%" },
-        { evidenceId: "chunk-1-e0", exactText: "survey covered 6 districts", kind: "span" },
+        { evidenceId: "chunk-0-e0", exactText: "rural literacy is just 61.11%", kind: "number", value: "61.11%", sourcePage: 1, chunk: 0 },
+        { evidenceId: "chunk-1-e0", exactText: "survey covered 6 districts", kind: "span", sourcePage: 2, chunk: 1 },
       ],
       task: "summarize",
+      sourcePageCount: 2,
     };
   }
 
@@ -67,21 +68,46 @@ describe("buildStage2SummarizePrompt", () => {
     expect(prompt).toContain("Task: summarize");
   });
 
-  it("exposes only allowed evidence fields (no provenance, no raw chunks)", () => {
+  it("exposes descriptive sourcePage/chunk locators but no raw provenance", () => {
     const prompt = buildStage2SummarizePrompt({
       evidence: [
         {
           evidenceId: "chunk-0-e0",
           exactText: "span",
           kind: "span",
+          sourcePage: 1,
+          chunk: 0,
           sourcePages: [1],
           chunkIndex: 0,
         },
       ],
       task: "summarize",
+      sourcePageCount: 3,
     });
+    expect(prompt).toContain('"sourcePage":1');
+    expect(prompt).toContain('"chunk":0');
+    expect(prompt).toContain("3 pages");
+    expect(prompt).not.toContain('"page":');
     expect(prompt).not.toContain("sourcePages");
     expect(prompt).not.toContain("chunkIndex");
+    expect(prompt).not.toContain("AiContextChunk");
+  });
+
+  it("tells the model locators are context-only and breadth is wanted", () => {
+    const prompt = buildStage2SummarizePrompt(validInput()).toLowerCase();
+    expect(prompt).toContain("descriptive");
+    expect(prompt).toContain("broadly");
+    expect(prompt).toContain("must never");
+    expect(prompt).toContain("claim fields");
+  });
+
+  it("carries no PDF bytes, files, blobs, or passwords", () => {
+    const prompt = buildStage2SummarizePrompt(validInput());
+    expect(prompt).not.toContain("JVBER");
+    expect(prompt).not.toContain("File");
+    expect(prompt).not.toContain("Blob");
+    expect(prompt).not.toContain("ArrayBuffer");
+    expect(prompt).not.toContain("password");
   });
 
   it("forbids excerpts, invented IDs, and comparison/attribution/causal work", () => {
@@ -100,6 +126,31 @@ describe("buildStage2SummarizePrompt", () => {
     );
     expect(() =>
       buildStage2SummarizePrompt({ evidence: validInput().evidence, task: "translate" }),
+    ).toThrow(Stage2PromptError);
+  });
+
+  it("rejects views missing descriptive locators or the page denominator", () => {
+    const [first, second] = validInput().evidence;
+    expect(() =>
+      buildStage2SummarizePrompt({
+        evidence: [{ ...first, sourcePage: undefined }, second],
+        task: "summarize",
+        sourcePageCount: 2,
+      }),
+    ).toThrow(Stage2PromptError);
+    expect(() =>
+      buildStage2SummarizePrompt({
+        evidence: [first, { ...second, chunk: -1 }],
+        task: "summarize",
+        sourcePageCount: 2,
+      }),
+    ).toThrow(Stage2PromptError);
+    expect(() =>
+      buildStage2SummarizePrompt({
+        evidence: validInput().evidence,
+        task: "summarize",
+        sourcePageCount: 0,
+      }),
     ).toThrow(Stage2PromptError);
   });
 });
