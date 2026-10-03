@@ -259,13 +259,15 @@ describe("STORE + evidence budget", () => {
   });
 
   it("11-12. budget is deterministic and truncation is flagged", async () => {
+    // Over-budget relative to the 64-item V8-A07 production budget, so
+    // three fixture pages (not one) are needed to exceed it.
     stubOllamaFetch({ stage1: (_callIndex, chunkText) => JSON.stringify(sliceSpans(chunkText, 40)) });
     const first = await runTier2ValidatedSummarize({
-      file: await testPdfFile(),
+      file: await testPdfFile(3),
       consentStore: grantedStore(),
     });
     const second = await runTier2ValidatedSummarize({
-      file: await testPdfFile(),
+      file: await testPdfFile(3),
       consentStore: grantedStore(),
     });
     expect(first.evidenceAdmitted).toBeGreaterThan(MAX_STAGE2_EVIDENCE_ITEMS);
@@ -379,11 +381,11 @@ describe("COVERAGE-BALANCED SELECTION (V7-A02)", () => {
     return Number(evidenceId.split("-")[1]);
   }
 
-  function overBudgetStub(captured: { pool: Array<{ evidenceId: string }> }) {
+  function overBudgetStub(captured: { pools: Array<Array<{ evidenceId: string }>> }) {
     return stubOllamaFetch({
       stage1: (_callIndex, chunkText) => JSON.stringify(sliceSpans(chunkText, 40)),
       stage2: (pool) => {
-        captured.pool = pool;
+        captured.pools.push(pool);
         return JSON.stringify([
           { kind: "fact", text: "Point.", evidenceIds: [pool[0]?.evidenceId] },
         ]);
@@ -391,8 +393,12 @@ describe("COVERAGE-BALANCED SELECTION (V7-A02)", () => {
     });
   }
 
+  function flattenedPools(captured: { pools: Array<Array<{ evidenceId: string }>> }) {
+    return captured.pools.flat();
+  }
+
   it("45. over-budget pool spreads across chunks instead of first-N", async () => {
-    const captured: { pool: Array<{ evidenceId: string }> } = { pool: [] };
+    const captured: { pools: Array<Array<{ evidenceId: string }>> } = { pools: [] };
     overBudgetStub(captured);
     const result = await runTier2ValidatedSummarize({
       file: await testPdfFile(3),
@@ -401,30 +407,32 @@ describe("COVERAGE-BALANCED SELECTION (V7-A02)", () => {
     expect(result.status).toBe("grounded");
     expect(result.evidenceAdmitted).toBeGreaterThan(MAX_STAGE2_EVIDENCE_ITEMS);
     expect(result.evidenceTruncated).toBe(true);
-    // Budget respected: whole items only, at most 24, budget fully used.
-    expect(captured.pool).toHaveLength(MAX_STAGE2_EVIDENCE_ITEMS);
+    // Budget respected across all Stage-2 calls: whole items only,
+    // at most the 64-item budget in total, budget fully used.
+    const pool = flattenedPools(captured);
+    expect(pool).toHaveLength(MAX_STAGE2_EVIDENCE_ITEMS);
     // Spread: first-N would carry chunk 0 only; balanced must reach
     // every chunk, including the trailing one.
-    const chunks = new Set(captured.pool.map((p) => chunkIndexOf(p.evidenceId)));
+    const chunks = new Set(pool.map((p) => chunkIndexOf(p.evidenceId)));
     expect(chunks.size).toBeGreaterThan(1);
     expect(chunks.has(2)).toBe(true);
   });
 
   it("46. balanced selection is deterministic across runs", async () => {
-    const first: { pool: Array<{ evidenceId: string }> } = { pool: [] };
+    const first: { pools: Array<Array<{ evidenceId: string }>> } = { pools: [] };
     overBudgetStub(first);
     const firstResult = await runTier2ValidatedSummarize({
       file: await testPdfFile(3),
       consentStore: grantedStore(),
     });
-    const second: { pool: Array<{ evidenceId: string }> } = { pool: [] };
+    const second: { pools: Array<Array<{ evidenceId: string }>> } = { pools: [] };
     overBudgetStub(second);
     const secondResult = await runTier2ValidatedSummarize({
       file: await testPdfFile(3),
       consentStore: grantedStore(),
     });
-    expect(second.pool.map((p) => p.evidenceId)).toEqual(
-      first.pool.map((p) => p.evidenceId),
+    expect(flattenedPools(second).map((p) => p.evidenceId)).toEqual(
+      flattenedPools(first).map((p) => p.evidenceId),
     );
     expect(JSON.stringify(secondResult.claims)).toBe(JSON.stringify(firstResult.claims));
     expect(secondResult.evidenceAdmitted).toBe(firstResult.evidenceAdmitted);
@@ -479,15 +487,16 @@ describe("COVERAGE-BALANCED SELECTION (V7-A02)", () => {
   });
 
   it("49. store stays immutable and C02/C03 behave as before", async () => {
-    const captured: { pool: Array<{ evidenceId: string }> } = { pool: [] };
+    const captured: { pools: Array<Array<{ evidenceId: string }>> } = { pools: [] };
     overBudgetStub(captured);
     const result = await runTier2ValidatedSummarize({
       file: await testPdfFile(3),
       consentStore: grantedStore(),
     });
     expect(result.status).toBe("grounded");
-    // Every grounded ID resolves inside the admitted store scope.
-    const admittedIds = new Set(captured.pool.map((p) => p.evidenceId));
+    // Every grounded ID resolves inside the admitted store scope
+    // (union over every section call's pool).
+    const admittedIds = new Set(flattenedPools(captured).map((p) => p.evidenceId));
     for (const claim of result.claims) {
       expect(claim.evidence.length).toBeGreaterThan(0);
       for (const id of claim.evidenceIds) {
@@ -584,11 +593,11 @@ describe("PAGE-AWARE STAGE-2 CONTRACT (V7-A04)", () => {
       poolIds: string[];
       result: Awaited<ReturnType<typeof runTier2ValidatedSummarize>>;
     }> {
-      const captured: { pool: Array<{ evidenceId: string }> } = { pool: [] };
+      const captured: { pools: Array<Array<{ evidenceId: string }>> } = { pools: [] };
       stubOllamaFetch({
         stage1: (_callIndex, chunkText) => JSON.stringify(sliceSpans(chunkText, 40)),
         stage2: (pool) => {
-          captured.pool = pool;
+          captured.pools.push(pool);
           return JSON.stringify([
             { kind: "fact", text: "Point.", evidenceIds: [pool[0]?.evidenceId] },
           ]);
@@ -598,7 +607,7 @@ describe("PAGE-AWARE STAGE-2 CONTRACT (V7-A04)", () => {
         file: await testPdfFile(3),
         consentStore: grantedStore(),
       });
-      return { poolIds: captured.pool.map((p) => p.evidenceId), result };
+      return { poolIds: captured.pools.flat().map((p) => p.evidenceId), result };
     }
     const first = await runOverBudget();
     const second = await runOverBudget();

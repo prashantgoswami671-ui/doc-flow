@@ -129,3 +129,32 @@ export function buildStage2SummarizePrompt(input: unknown): string {
     `Task: ${input.task} (${input.sourcePageCount} pages)`
   );
 }
+
+/**
+ * V8-A07 — Section-level synthesis instruction (production equivalent
+ * of the validated A03/A05 P2 research directive). Appended verbatim
+ * to the published Stage-2 prompt for per-section calls: same
+ * evidence serialization, same frozen claim contract, same C02
+ * bounds — only the synthesis direction is added. Encourages
+ * combining related items into stronger multi-evidence claims and
+ * representing distinct section information, without requiring
+ * every item to be cited and without permitting invented IDs.
+ */
+const SECTION_SYNTHESIS_DIRECTIVE =
+  "Additional utilization directive: treat the supplied evidence items as the source " +
+  "material to be synthesized, not merely as examples. When several evidence items describe " +
+  "the same topic, development, section, or relationship, synthesize them into one stronger " +
+  "claim citing all materially supporting evidence IDs, instead of producing isolated " +
+  "one-item restatements. Avoid spending many claims on redundant restatements; use the " +
+  "available claim budget to represent distinct information across the supplied evidence. " +
+  "There is no requirement to cite every evidence item.";
+
+/**
+ * Builds the per-section Stage-2 synthesis prompt from frozen
+ * `Stage2Input` (here: one section's evidence views). Identical
+ * serialization and contract to `buildStage2SummarizePrompt`, plus
+ * the section synthesis directive above.
+ */
+export function buildSectionSummarizePrompt(input: unknown): string {
+  return `${buildStage2SummarizePrompt(input)}\n\n${SECTION_SYNTHESIS_DIRECTIVE}`;
+}
