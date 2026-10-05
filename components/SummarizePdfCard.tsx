@@ -22,6 +22,7 @@ import {
   runTier2ValidatedSummarize,
   type Tier2ValidatedSummarizeResult,
 } from "../services/ai/tier2Summarize";
+import { Tier2ResultCache } from "../services/ai/cache/tier2ResultCache";
 import {
   projectDetailMode,
   type DetailMode,
@@ -65,6 +66,10 @@ export default function SummarizePdfCard() {
   const runtimeRef = useRef<AiRuntime | null>(null);
   const ollamaMetaRef = useRef<OllamaRuntime | null>(null);
   const consentStoreRef = useRef<AiConsentStore | null>(null);
+  // V8-A09: caller-owned in-memory reuse cache (one per card; page
+  // lifetime; cleared on reload). Passed into every Tier-2 run so a
+  // repeated summarization of the same document reuses validated
+  // grounded artifacts with zero new model calls.
 
   const [provider, setProvider] = useState<ProviderChoice>("browser");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -96,6 +101,15 @@ export default function SummarizePdfCard() {
       ollamaMetaRef.current = new OllamaRuntime();
     }
     return ollamaMetaRef.current;
+  }
+
+  const resultCacheRef = useRef<Tier2ResultCache | null>(null);
+
+  function getResultCache(): Tier2ResultCache {
+    if (!resultCacheRef.current) {
+      resultCacheRef.current = new Tier2ResultCache();
+    }
+    return resultCacheRef.current;
   }
 
   function getConsentStore(): AiConsentStore {
@@ -197,6 +211,7 @@ export default function SummarizePdfCard() {
       const validated = await runTier2ValidatedSummarize({
         file: selectedFile,
         consentStore: getConsentStore(),
+        cache: getResultCache(),
       });
       if (requestId !== requestIdRef.current) return;
       setTier2Result(validated);
@@ -678,6 +693,8 @@ export default function SummarizePdfCard() {
                   grounded pages · {tier2Projection.characterCount} chars
                   {tier2Projection.omittedIndexes.length > 0 &&
                     " · lower-priority points intentionally omitted (source coverage unchanged)"}
+                  {tier2Result.cacheStatus === "hit" &&
+                    ` · reused previously acquired evidence (${tier2Result.avoidedStage1Calls + tier2Result.avoidedStage2Calls} model calls avoided)`}
                 </p>
               </fieldset>
             )}
