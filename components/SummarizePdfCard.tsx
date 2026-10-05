@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AiEmptyContextError, runAiActionOnPdf, type RunAiActionOnPdfResult } from "../services/ai/orchestration";
 import type { AiRuntime } from "../services/ai/types";
 import { selectAiRuntime } from "../services/ai/providerSelection";
@@ -22,6 +22,10 @@ import {
   runTier2ValidatedSummarize,
   type Tier2ValidatedSummarizeResult,
 } from "../services/ai/tier2Summarize";
+import {
+  projectDetailMode,
+  type DetailMode,
+} from "../services/ai/stage2/detailModes";
 import ResultPanel from "./ResultPanel";
 import UploadZone from "./UploadZone";
 
@@ -70,6 +74,9 @@ export default function SummarizePdfCard() {
   const [errorKind, setErrorKind] = useState<"empty" | "cancelled" | "generic" | null>(null);
   const [result, setResult] = useState<RunAiActionOnPdfResult | null>(null);
   const [tier2Result, setTier2Result] = useState<Tier2ValidatedSummarizeResult | null>(null);
+  // V8-A08: detail mode projects the ALREADY-assembled grounded claim
+  // set locally. Switching modes never reacquires (no pipeline rerun).
+  const [detailMode, setDetailMode] = useState<DetailMode>("detailed");
   const [copied, setCopied] = useState(false);
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus>("idle");
   const [disclosure, setDisclosure] = useState<AiDisclosure | null>(null);
@@ -137,6 +144,7 @@ export default function SummarizePdfCard() {
     setCopied(false);
     setProcessingStage(null);
     setDisclosureDismissed(false);
+    setDetailMode("detailed");
     if (next === "ollama" && ollamaStatus !== "ready" && ollamaStatus !== "checking") {
       void checkOllama();
     }
@@ -161,6 +169,7 @@ export default function SummarizePdfCard() {
     setTier2Result(null);
     setCopied(false);
     setDisclosureDismissed(false);
+    setDetailMode("detailed");
   };
 
   const handleReset = () => {
@@ -173,6 +182,7 @@ export default function SummarizePdfCard() {
     setCopied(false);
     setProcessingStage(null);
     setDisclosureDismissed(false);
+    setDetailMode("detailed");
   };
 
   const handleCancel = () => {
@@ -338,8 +348,34 @@ export default function SummarizePdfCard() {
     ? tier2Result.claims.map((claim) => claim.text).join("\n\n")
     : "";
 
+  // V8-A08 deterministic mode projection over the retained grounded
+  // result. Pure local computation (useMemo) — switching `detailMode`
+  // never invokes runTier2ValidatedSummarize again.
+  const tier2Projection = useMemo(() => {
+    if (!tier2Result || tier2Result.status !== "grounded") {
+      return null;
+    }
+    try {
+      return projectDetailMode(
+        {
+          claims: tier2Result.claims,
+          sourcePageCount: tier2Result.sourcePageCount,
+          pagesWithoutText: tier2Result.pagesWithoutText,
+          failedSections: tier2Result.failedSections,
+        },
+        detailMode,
+      );
+    } catch {
+      return null;
+    }
+  }, [tier2Result, detailMode]);
+
+  const tier2ModeSummaryText = tier2Projection
+    ? tier2Projection.claims.map((claim) => claim.text).join("\n\n")
+    : tier2SummaryText;
+
   const handleCopy = async () => {
-    const textToCopy = provider === "ollama" ? tier2SummaryText : result?.text;
+    const textToCopy = provider === "ollama" ? tier2ModeSummaryText : result?.text;
     if (!textToCopy) return;
     try {
       await navigator.clipboard.writeText(textToCopy);
@@ -609,13 +645,50 @@ export default function SummarizePdfCard() {
               </p>
             )}
 
-            {tier2Result.status === "grounded" && (
+            {tier2Result.status === "grounded" && tier2Projection && (
+              <fieldset className="mb-3">
+                <legend className="text-xs font-semibold text-gray-500">Detail level</legend>
+                <div className="mt-2 flex gap-2" role="radiogroup" aria-label="Summary detail level">
+                  {(
+                    [
+                      { value: "concise", label: "Concise" },
+                      { value: "detailed", label: "Detailed" },
+                      { value: "very-detailed", label: "Very Detailed" },
+                    ] as const
+                  ).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={detailMode === option.value}
+                      onClick={() => setDetailMode(option.value)}
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                        detailMode === option.value
+                          ? "border-blue-600 bg-blue-600 text-white"
+                          : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  {tier2Projection.claims.length} of {tier2Result.claims.length} points ·{" "}
+                  {tier2Projection.groundedPages.length} of {tier2Projection.fullGroundedPages.length}{" "}
+                  grounded pages · {tier2Projection.characterCount} chars
+                  {tier2Projection.omittedIndexes.length > 0 &&
+                    " · lower-priority points intentionally omitted (source coverage unchanged)"}
+                </p>
+              </fieldset>
+            )}
+
+            {tier2Result.status === "grounded" && tier2Projection && (
               <div className="mb-4 rounded-lg border border-gray-200 bg-white px-4 py-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                   Summary points
                 </h3>
                 <ul className="mt-2 space-y-2">
-                  {tier2Result.claims.map((claim, claimIndex) => (
+                  {(tier2Projection.claims.length > 0 ? tier2Projection.claims : []).map((claim, claimIndex) => (
                     <li key={`${claimIndex}-${claim.kind}-${claim.evidenceIds.join("+")}`} className="text-sm leading-relaxed text-gray-800">
                       {claim.text}
                     </li>
@@ -631,13 +704,13 @@ export default function SummarizePdfCard() {
               </div>
             )}
 
-            {tier2Result.status === "grounded" && (
+            {tier2Result.status === "grounded" && tier2Projection && (
               <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                   Source evidence
                 </h3>
                 <ul className="mt-2 space-y-1">
-                  {tier2Result.claims.flatMap((claim, claimIndex) =>
+                  {tier2Projection.claims.flatMap((claim, claimIndex) =>
                     claim.evidence.map((grounded, evidenceIndex) => (
                       <li
                         key={`${claimIndex}-${evidenceIndex}-${grounded.item.evidenceId}`}
