@@ -169,3 +169,143 @@ describe("SummarizePdfCard detail modes (V8-A08)", () => {
     expect(screen.queryByText(/\[p\. 1\]/)).not.toBeInTheDocument();
   });
 });
+
+describe("SummarizePdfCard pre-run detail-mode selection (post-V8 UX-01)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cleanup();
+    mockedAvailability.mockResolvedValue({ status: "available" } as never);
+    mockedTier2.mockResolvedValue(fiveClaimResult() as never);
+  });
+
+  async function selectFileThenOllama(name = "test.pdf") {
+    render(<SummarizePdfCard />);
+    const file = new File(["%PDF-1.4 fake"], name, { type: "application/pdf" });
+    await act(async () => {
+      fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
+        target: { files: [file] },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText(/Ollama \(qwen3:4b/i));
+    });
+    await screen.findByRole("radiogroup", { name: /Summary detail level/i });
+    return file;
+  }
+
+  async function approveDisclosure() {
+    await screen.findByText("Send selected text to Ollama (qwen3:4b).");
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Send selected text to Ollama (qwen3:4b)" }),
+      );
+    });
+  }
+
+  it("modes are Tier-2-only: no selector on the Browser path", async () => {
+    render(<SummarizePdfCard />);
+    await act(async () => {
+      fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
+        target: { files: [new File(["%PDF-1.4 fake"], "test.pdf", { type: "application/pdf" })] },
+      });
+    });
+    await screen.findByText("test.pdf");
+    expect(screen.queryByRole("radiogroup", { name: /Summary detail level/i })).not.toBeInTheDocument();
+  });
+
+  it("default mode is Detailed and all three modes are pre-selectable with zero acquisition", async () => {
+    await selectFileThenOllama();
+    expect(screen.getByRole("radio", { name: "Detailed" })).toHaveAttribute("aria-checked", "true");
+    for (const name of ["Concise", "Very Detailed", "Detailed"] as const) {
+      await act(async () => {
+        fireEvent.click(screen.getByRole("radio", { name }));
+      });
+      expect(screen.getByRole("radio", { name })).toHaveAttribute("aria-checked", "true");
+      expect(mockedTier2).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    ["Concise", "3 of 5 points"],
+    ["Detailed", "4 of 5 points"],
+    ["Very Detailed", "5 of 5 points"],
+  ] as const)("pre-selected %s becomes the initial displayed projection", async (mode, count) => {
+    await selectFileThenOllama();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("radio", { name: mode }));
+    });
+    await approveDisclosure();
+    expect(await screen.findByText(new RegExp(count, "i"))).toBeInTheDocument();
+    expect(mockedTier2).toHaveBeenCalledTimes(1);
+  });
+
+  it("pre-run mode selection does not alter the summarization invocation", async () => {
+    const file = await selectFileThenOllama();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("radio", { name: "Very Detailed" }));
+    });
+    await approveDisclosure();
+    await screen.findByText(/5 of 5 points/i);
+    expect(mockedTier2).toHaveBeenCalledTimes(1);
+    const args = mockedTier2.mock.calls[0][0] as Record<string, unknown>;
+    expect(args.file).toBe(file);
+    expect("mode" in args).toBe(false);
+    expect("detailMode" in args).toBe(false);
+    expect("detail" in args).toBe(false);
+  });
+
+  it("mode control is frozen while a run is active (exactly one acquisition)", async () => {
+    let release!: (value: unknown) => void;
+    mockedTier2.mockImplementationOnce(
+      () => new Promise((resolve) => (release = resolve as (value: unknown) => void)),
+    );
+    await selectFileThenOllama();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("radio", { name: "Concise" }));
+    });
+    await approveDisclosure();
+    expect(screen.getByRole("radio", { name: "Concise" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Detailed" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Very Detailed" })).toBeDisabled();
+    await act(async () => {
+      release(fiveClaimResult());
+    });
+    expect(await screen.findByText(/3 of 5 points/i)).toBeInTheDocument();
+    expect(mockedTier2).toHaveBeenCalledTimes(1);
+  });
+
+  it("file reset returns the selector to Detailed", async () => {
+    await selectFileThenOllama();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("radio", { name: "Concise" }));
+    });
+    await approveDisclosure();
+    await screen.findByText(/3 of 5 points/i);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Summarize another PDF/i }));
+    });
+    await act(async () => {
+      fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
+        target: { files: [new File(["%PDF-1.4 fake"], "second.pdf", { type: "application/pdf" })] },
+      });
+    });
+    await screen.findByText("second.pdf");
+    expect(screen.getByRole("radio", { name: "Detailed" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("provider switch returns the selector to Detailed", async () => {
+    await selectFileThenOllama();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("radio", { name: "Very Detailed" }));
+    });
+    expect(screen.getByRole("radio", { name: "Very Detailed" })).toHaveAttribute("aria-checked", "true");
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText(/Browser AI \(on-device\)/i));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText(/Ollama \(qwen3:4b/i));
+    });
+    await screen.findByRole("radiogroup", { name: /Summary detail level/i });
+    expect(screen.getByRole("radio", { name: "Detailed" })).toHaveAttribute("aria-checked", "true");
+  });
+});

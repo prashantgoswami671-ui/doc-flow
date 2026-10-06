@@ -501,6 +501,57 @@ export default function SummarizePdfCard() {
             </div>
           )}
 
+          {/* Post-V8 UX-01: the single detail-mode selector lives here,
+              before summarization. It only sets local UI state (no
+              acquisition); the chosen mode becomes the initial
+              projection when the grounded result arrives, and the same
+              control keeps switching projections afterwards. Rendered
+              for the Ollama path only — detail modes project Tier-2
+              grounded claims, which the Browser path does not produce.
+              Frozen (disabled) while a run is active so the desired
+              mode cannot change mid-acquisition. */}
+          {selectedFile && provider === "ollama" && (
+            <fieldset className="mb-4">
+              <legend className="text-xs font-semibold text-gray-500">Summary detail</legend>
+              <div className="mt-2 flex gap-2" role="radiogroup" aria-label="Summary detail level">
+                {(
+                  [
+                    { value: "concise", label: "Concise" },
+                    { value: "detailed", label: "Detailed" },
+                    { value: "very-detailed", label: "Very Detailed" },
+                  ] as const
+                ).map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={detailMode === option.value}
+                    disabled={isProcessing}
+                    onClick={() => setDetailMode(option.value)}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      detailMode === option.value
+                        ? "border-blue-600 bg-blue-600 text-white"
+                        : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              {tier2Result?.status === "grounded" && tier2Projection && (
+                <p className="mt-1 text-xs text-gray-500">
+                  {tier2Projection.claims.length} of {tier2Result.claims.length} points ·{" "}
+                  {tier2Projection.groundedPages.length} of {tier2Projection.fullGroundedPages.length}{" "}
+                  grounded pages · {tier2Projection.characterCount} chars
+                  {tier2Projection.omittedIndexes.length > 0 &&
+                    " · lower-priority points intentionally omitted (source coverage unchanged)"}
+                  {tier2Result.cacheStatus === "hit" &&
+                    ` · reused previously acquired evidence (${tier2Result.avoidedStage1Calls + tier2Result.avoidedStage2Calls} model calls avoided)`}
+                </p>
+              )}
+            </fieldset>
+          )}
+
           {showDisclosure && (
             <div
               aria-label="Ollama consent disclosure"
@@ -658,45 +709,6 @@ export default function SummarizePdfCard() {
                     ? "The model returned an unusable response format, so no summary is shown."
                     : "The model output could not be grounded to source evidence, so no summary is shown."}
               </p>
-            )}
-
-            {tier2Result.status === "grounded" && tier2Projection && (
-              <fieldset className="mb-3">
-                <legend className="text-xs font-semibold text-gray-500">Detail level</legend>
-                <div className="mt-2 flex gap-2" role="radiogroup" aria-label="Summary detail level">
-                  {(
-                    [
-                      { value: "concise", label: "Concise" },
-                      { value: "detailed", label: "Detailed" },
-                      { value: "very-detailed", label: "Very Detailed" },
-                    ] as const
-                  ).map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={detailMode === option.value}
-                      onClick={() => setDetailMode(option.value)}
-                      className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                        detailMode === option.value
-                          ? "border-blue-600 bg-blue-600 text-white"
-                          : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-1 text-xs text-gray-500">
-                  {tier2Projection.claims.length} of {tier2Result.claims.length} points ·{" "}
-                  {tier2Projection.groundedPages.length} of {tier2Projection.fullGroundedPages.length}{" "}
-                  grounded pages · {tier2Projection.characterCount} chars
-                  {tier2Projection.omittedIndexes.length > 0 &&
-                    " · lower-priority points intentionally omitted (source coverage unchanged)"}
-                  {tier2Result.cacheStatus === "hit" &&
-                    ` · reused previously acquired evidence (${tier2Result.avoidedStage1Calls + tier2Result.avoidedStage2Calls} model calls avoided)`}
-                </p>
-              </fieldset>
             )}
 
             {tier2Result.status === "grounded" && tier2Projection && (
