@@ -16,6 +16,7 @@ import ProtectPdfCard from "../ProtectPdfCard";
 import UnlockPdfCard from "../UnlockPdfCard";
 import SummarizePdfCard from "../SummarizePdfCard";
 import TranslatePdfCard from "../TranslatePdfCard";
+import KeyPointsPdfCard from "../KeyPointsPdfCard";
 
 /**
  * Maps a tool-catalog slug to its existing, already-functional tool
@@ -43,4 +44,5 @@ export const TOOL_COMPONENTS: Record<string, ComponentType> = {
   "unlock-pdf": UnlockPdfCard,
   "summarize-pdf": SummarizePdfCard,
   "translate-pdf": TranslatePdfCard,
+  "key-points-pdf": KeyPointsPdfCard,
 };
