@@ -155,6 +155,12 @@ export const TOOL_CATALOG: ToolEntry[] = [
     description: "Get a concise summary of your PDF — processed locally in your browser.",
     category: "ai",
   },
+  {
+    slug: "translate-pdf",
+    name: "Translate PDF",
+    description: "Translate extracted PDF text into a supported language.",
+    category: "ai",
+  },
 ];
 
 export function getToolBySlug(slug: string): ToolEntry | undefined {

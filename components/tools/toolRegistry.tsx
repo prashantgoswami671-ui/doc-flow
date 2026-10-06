@@ -15,6 +15,7 @@ import WatermarkPdfCard from "../WatermarkPdfCard";
 import ProtectPdfCard from "../ProtectPdfCard";
 import UnlockPdfCard from "../UnlockPdfCard";
 import SummarizePdfCard from "../SummarizePdfCard";
+import TranslatePdfCard from "../TranslatePdfCard";
 
 /**
  * Maps a tool-catalog slug to its existing, already-functional tool
@@ -41,4 +42,5 @@ export const TOOL_COMPONENTS: Record<string, ComponentType> = {
   "protect-pdf": ProtectPdfCard,
   "unlock-pdf": UnlockPdfCard,
   "summarize-pdf": SummarizePdfCard,
+  "translate-pdf": TranslatePdfCard,
 };
