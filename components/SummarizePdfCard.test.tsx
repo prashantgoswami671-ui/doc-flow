@@ -433,6 +433,9 @@ describe("SummarizePdfCard Tier-2 (Ollama)", () => {
       evidenceTruncated: false,
       rejectedClaims: 0,
       failedChunks: [],
+      sectionCount: 1,
+      failedSections: [],
+      groundedPages: [1],
     };
   }
 
@@ -551,6 +554,26 @@ describe("SummarizePdfCard Tier-2 (Ollama)", () => {
     expect(await screen.findByText(/Tier-2 Ollama/i)).toBeInTheDocument();
   });
 
+  it("51b. failed hierarchical sections are disclosed without implying page coverage", async () => {
+    mockedTier2.mockResolvedValue({
+      ...groundedResult(),
+      sectionCount: 3,
+      failedSections: [1],
+    } as never);
+    await selectOllamaWithFile();
+    await screen.findByText("Send selected text to Ollama (qwen3:4b).");
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Send selected text to Ollama (qwen3:4b)" }),
+      );
+    });
+    const notice = await screen.findByText(/could not be summarized/i);
+    expect(notice).toBeInTheDocument();
+    expect(notice.textContent).toMatch(/1 of 3/);
+    // Section indexes are disclosed as counts only — never as page numbers.
+    expect(notice.textContent).not.toMatch(/page/i);
+  });
+
   it("Tier-2 limited state shows no fabricated summary", async () => {
     mockedTier2.mockResolvedValue({
       status: "limited",
@@ -565,6 +588,9 @@ describe("SummarizePdfCard Tier-2 (Ollama)", () => {
       evidenceTruncated: false,
       rejectedClaims: 1,
       failedChunks: [],
+      sectionCount: 1,
+      failedSections: [],
+      groundedPages: [],
     } as never);
     await selectOllamaWithFile();
     await screen.findByText("Send selected text to Ollama (qwen3:4b).");
@@ -660,6 +686,9 @@ describe("SummarizePdfCard Tier-2 grounding (E02)", () => {
       evidenceTruncated: false,
       rejectedClaims: 2,
       failedChunks: [1],
+      sectionCount: 2,
+      failedSections: [],
+      groundedPages: [1, 2],
     };
   }
 
@@ -798,6 +827,9 @@ describe("SummarizePdfCard Tier-2 errors and fallback (E03)", () => {
       evidenceTruncated: false,
       rejectedClaims: 0,
       failedChunks: [],
+      sectionCount: 1,
+      failedSections: [],
+      groundedPages: [],
     } as never);
     await startOllamaWithFile();
     await approveDisclosure();
@@ -841,6 +873,9 @@ describe("SummarizePdfCard Tier-2 errors and fallback (E03)", () => {
       evidenceTruncated: false,
       rejectedClaims: 0,
       failedChunks: [0],
+      sectionCount: 0,
+      failedSections: [],
+      groundedPages: [],
     } as never);
     await act(async () => {
       fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {

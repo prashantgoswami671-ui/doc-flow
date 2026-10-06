@@ -767,6 +767,14 @@ export default function SummarizePdfCard() {
               </p>
             )}
 
+            {tier2Result.failedSections.length > 0 && (
+              <p className="mb-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                {tier2Result.failedSections.length} of {tier2Result.sectionCount} document
+                section{tier2Result.failedSections.length === 1 ? "" : "s"} could not be summarized
+                and {tier2Result.failedSections.length === 1 ? "was" : "were"} excluded from this result.
+              </p>
+            )}
+
             {tier2Result.pagesWithoutText.length > 0 && (
               <p className="mb-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
                 Pages without extractable text: {tier2Result.pagesWithoutText.join(", ")} — these
