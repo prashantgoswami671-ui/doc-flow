@@ -357,19 +357,19 @@ V8-A01 and V8-A02 must happen before this becomes a production decision. Do NOT 
 
 | Task | Status |
 | ---- | ------ |
-| V8-00 | 🔵 Roadmap establishment |
-| V8-A01 | ⬜ Not started |
-| V8-A02 | ⬜ Not started |
-| V8-A03 | ⬜ Conditional |
-| V8-A04 | ⬜ Conditional |
-| V8-A05 | ⬜ Conditional |
-| V8-A06 | ⬜ Not started |
-| V8-A07 | ⬜ Not started |
-| V8-A08 | ⬜ Not started |
-| V8-A09 | ⬜ Not started |
-| V8-A10 | ⬜ Not started |
-| V8-A11 | ⬜ Not started |
-| V8-A12 | ⬜ Not started |
+| V8-00 | ✅ Roadmap establishment (`4012903`) |
+| V8-A01 | ✅ Output-compression diagnosis |
+| V8-A02 | ✅ Larger-flat capacity experiment |
+| V8-A03 | ✅ Prompt / evidence-utilization experiment |
+| V8-A04 | ✅ Hierarchical prototype |
+| V8-A05 | ✅ Controlled flat-vs-hierarchical comparison (hierarchical: 17–19 grounded pages vs flat 13–14 on the 22-page fixture; 0 C02/C03 failures) |
+| V8-A06 | ✅ Architecture decision (hierarchical, evidence-based) |
+| V8-A07 | ✅ Production hierarchical implementation (`f1eb683`) |
+| V8-A08 | ✅ Concise / Detailed / Very Detailed modes (`921118c`) |
+| V8-A09 | ✅ Caching/reuse (`93ffa92`) |
+| V8-A10 | ✅ 20 / 30 / 49-page validation (incl. 49-page fixture `DTIC_AD1042291.pdf`, qualified outside the repo) |
+| V8-A11 | ✅ Final reliability/performance/UX validation + failed-section disclosure fix (`60c370e`) |
+| V8-A12 | ✅ Closure review (this section) |
 
 Do not mark later tasks complete merely because the roadmap exists.
 
@@ -390,3 +390,29 @@ Record:
 ## 13. V8 Closure Rule
 
 > V8 remains OPEN until the original user problem — obtaining useful Concise, Detailed, and Very Detailed grounded summaries for approximately 20–50 page text-bearing PDFs — is demonstrated as solved by the validation gates above. If the current architecture is insufficient, V8 remains open and is amended rather than prematurely closed.
+
+## 14. V8 Closure (A12) — V8 COMPLETE WITH POST-V8 HARDENING ITEMS
+
+Closed on the published chain `4012903` (roadmap) → `f1eb683` (A07) → `921118c` (A08) → `93ffa92` (A09) → `60c370e` (A11 fix). No production diff remains open against this roadmap.
+
+### Final architecture
+
+PDF → AI-02 extraction/chunking → RED3 Stage-1 → Evidence Store → V7-A02 selection (64-item default) → deterministic hierarchical section partition → per-section grounded Stage-2 → C02 → C03 → grounded section assembly → A08 Concise / Detailed / Very Detailed deterministic projection → A09 local in-memory reuse → user-facing summary. No second synthesis LLM call; root evidence IDs stay authoritative; section failures stay explicit; modes are synchronous projections; the cache persists no raw PDF bytes.
+
+### Validation bands (fixture measurements, qwen3:4b local Ollama — not universal claims)
+
+- ~20 pages (`Delimitation-Booklet-8.pdf`, 22pp/20 text): 18–19 grounded pages across runs; 9 sections; modes 18–41 claims by run; warm reuse byte-identical in 96ms–45s depending on environment load; one transient failed section observed and correctly gap-recorded.
+- 30–40 pages (`5_Fourth_Sem_Economics_June_2021.pdf`, exam paper — conditional fixture): 25/30 grounded pages; 8 sections; 0 C02/C03 failures; pages 17/30 lost to acquisition/admission (budget diagnostics to 256 did not recover them).
+- ~50 pages (`DTIC_AD1042291.pdf`, GAO-17-351, 49/49 text, 94,774 chars — kept outside the repo): 36/49 grounded pages; 18 sections; 0 failures in every category; 64-item selection reached the full admitted page range including late pages 40–49; modes 31/60/68 claims; cold ~1470s; warm hit 45s in that run; switches 1–6ms with zero acquisition.
+
+### Exit criteria
+
+Detail modes PASS; Coverage PASS WITH LIMITATION (Very Detailed retains all grounded claims; unevidenced pages remain uncovered); Gaps PASS (source gaps vs intentional omissions distinguishable, incl. the A11 failed-section disclosure); Grounding PASS (claim → evidenceId → immutable exactText → page/chunk intact); 20-page PASS; 30–40 CONDITIONAL (one exam fixture); ~50 PASS FOR TESTED FIXTURE; Cache PASS; Reliability PASS (no unacceptable failures); Performance PASS (measured, no SLA); UX PASS.
+
+### Limitations
+
+Fixture-based evidence only (one fixture per band; 30-page fixture is an exam paper); no universal model-quality, coverage, budget-sufficiency, or SLA claims; no guarantee for arbitrary PDFs. Selected-but-uncited evidence grows with length (0–1 → 3 → 12 pages) — utilization observation for later work, not a V8 blocker. Live-model run-to-run variance confirmed (temperature-0 is not run-deterministic).
+
+### Post-V8 hardening (separate scope, not started)
+
+1. SHA-256 + byte-length document identity; 2. extraction-code/generation-settings cache fingerprint versions; 3. deeper cache immutability; 4. remaining warm-abort branch tests; 5. `partitionExact` orchestrator-throw test; 6. A08 projection-error test; 7. selected-but-uncited utilization trend; 8. performance work only on evidence. This roadmap specifies no V9 plan; post-hardening items stay separate and next-phase work proceeds independently.
