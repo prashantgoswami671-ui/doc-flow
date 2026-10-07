@@ -1,7 +1,7 @@
 # DocFlow — Master Product Roadmap v6
 
 **Single source of truth for execution**  
-**Revision:** v6 — created from the full read-only repository audit completed 2026-09-18  
+**Revision:** v6 — created from the full read-only repository audit completed 2026-09-18; scope-reconciled after the published AI-05/06/07 chain
 **Intended repository:** `C:\Users\sunit\Desktop\doc-flow`  
 **GitHub:** `https://github.com/prashantgoswami671-ui/doc-flow`  
 **Branch:** `main`
@@ -50,8 +50,8 @@ The 2026-09-18 read-only audit established the following baseline.
 ## 1.1 Git state
 
 - Branch: `main`
-- HEAD: `6bcfc0e3e0d5e00c1dc59cc591a6f8a6010a3407`
-- Local `main` and existing `origin/main` refs are in sync (`0/0` divergence at audit time).
+- Current published HEAD: `65bbef4a862c59279c944803896262d3d42f9f83` (`feat: add AI-07 ask pdf`)
+- `origin/main` points to the same published commit.
 - Tracked working tree: clean.
 - Suspicious zero-byte root-level files remain untracked and untouched.
 - `benchmark-docs/` remains ignored and must stay out of normal commits unless a future governance decision explicitly changes that.
@@ -81,12 +81,12 @@ Current production Browser AI characteristics:
 - Production AI context bound is approximately 8,192 extracted characters.
 - Production output is bounded to 256 new tokens.
 - Lifecycle, cancellation, disposal, and stale-worker protections are tested.
-- Summarize PDF is the current production AI feature.
-- Real Browser AI E2E coverage exists but was **not re-run during the 2026-09-18 audit**.
+- Summarize PDF, Translate PDF, Key Points, and Ask PDF are current production AI features.
+- Real Browser AI E2E coverage exists, but the latest recorded Browser Summarize run timed out under the environment-gated WASM path; Brave/manual QA is not yet recorded as complete.
 
 ## 1.3 Tier 2 — Ollama
 
-A production-grade runtime implementation exists, but it is **not yet reachable from the production UI**.
+A production-grade runtime implementation exists and is reachable from the production Summarize, Translate, Key Points, and Ask PDF UI paths.
 
 Existing production runtime:
 
@@ -107,8 +107,16 @@ The runtime is:
 - locally loopback-bound;
 - unit-tested;
 - covered by the existing egress guard;
-- not wired into a production UI;
-- missing the production consent/disclosure flow required before user-facing Tier-2 use.
+- wired into provider-aware production UI;
+- protected by availability checks, consent/disclosure where required, and loopback egress controls.
+
+Dedicated production-tool scope:
+
+- The original v5 generic AI-03 prompt-box architecture is formally superseded.
+- Current production scope uses dedicated task-specific cards for Summarize, Translate, Key Points, and Ask PDF.
+- AI-04 is complete with variance because Summarize shipped as a dedicated card rather than a generic prompt preset.
+- AI-05, AI-06, and AI-07 are published in `de69e062`, `44c9ba96`, and `65bbef4`, respectively.
+- No production telemetry or real-user usage dataset exists. The original v5 usage gate is superseded by the current V6/V7/V8 implementation, security, and verification gates; tests and benchmarks are not user-usage evidence.
 
 ## 1.4 Tier 3 / BYOK
 
@@ -458,7 +466,7 @@ The exact UI shape should be chosen after the architecture gates above, not befo
 Possible production surface:
 
 - provider-aware Summarize;
-- generic prompt surface;
+- generic prompt surface (historical alternative; superseded by dedicated production tools);
 - or another single bounded capability surface.
 
 The choice must preserve the architectural boundary rather than creating a second unrelated AI pipeline.
@@ -661,21 +669,20 @@ No claim should be stronger than its evidence.
 
 # 15. Current v6 Starting Point
 
-At the moment this roadmap is created:
+The original v6 starting point is historical. The current published state is:
 
 ```text
-Repository baseline                         ✅ audited
-Working tree                                ✅ clean
+Repository baseline                         ✅ `65bbef4` published and clean
 Tier-1 Browser AI runtime                   ✅
 Tier-1 production Summarize                ✅
+Tier-1 production Translate/Key Points/Ask ✅
 Tier-1 egress guard                         ✅
-Tier-2 Ollama runtime                      ✅
-Tier-2 Ollama production UI                ❌
+Tier-2 Ollama runtime/UI/consent            ✅
+Production Evidence Store                   ✅ Tier-2 validated path
+Production Stage-2 validation               ✅ Tier-2 validated path
 T2-02 → T2-09 research                      ✅ evidence collected
-Production Evidence Store                   ❌
-Production Stage-2 validation               ❌
-Tier-2 consent/disclosure                   ❌
-Tier-2 real browser E2E current evidence    ❌ not freshly verified
+Tier-2 real browser E2E                     ✅ recorded for tested Summarize path
+Browser AI final E2E/Brave QA               🟡 environment-qualified/open
 CI pipeline                                 ❌
 Tier-3/BYOK                                  ❌
 Cloud AI                                    ❌
@@ -683,11 +690,7 @@ Cloud AI                                    ❌
 
 ## Immediate next task
 
-**V6-A01 — Reconcile `docs/DOCFLOW_STATUS.md` with this audited repository state.**
-
-No production AI architecture work should begin until this documentation baseline is synchronized.
-
-After V6-A01, proceed to the Evidence Store design/implementation gates in Phase V6-B.
+**Current next closure task:** complete the environment-qualified Browser AI E2E and Brave/manual QA review. The V6-A01 baseline reconciliation and later V6-B through V6-G implementation gates are historical completed work; do not restart them from this roadmap.
 
 ---
 

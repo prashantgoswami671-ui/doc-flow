@@ -395,6 +395,8 @@ Record:
 
 Closed on the published chain `4012903` (roadmap) → `f1eb683` (A07) → `921118c` (A08) → `93ffa92` (A09) → `60c370e` (A11 fix). No production diff remains open against this roadmap.
 
+This V8 closure is scoped to long-form grounded summarization. It does not govern the later dedicated AI-05 Translate, AI-06 Key Points, or AI-07 Ask PDF capabilities, which were published after the V8 work under the current dedicated-tool architecture. The old v5 generic AI-03 prompt-box design is not required by the current production scope.
+
 ### Final architecture
 
 PDF → AI-02 extraction/chunking → RED3 Stage-1 → Evidence Store → V7-A02 selection (64-item default) → deterministic hierarchical section partition → per-section grounded Stage-2 → C02 → C03 → grounded section assembly → A08 Concise / Detailed / Very Detailed deterministic projection → A09 local in-memory reuse → user-facing summary. No second synthesis LLM call; root evidence IDs stay authoritative; section failures stay explicit; modes are synchronous projections; the cache persists no raw PDF bytes.
