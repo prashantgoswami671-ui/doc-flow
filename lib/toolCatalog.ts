@@ -167,6 +167,12 @@ export const TOOL_CATALOG: ToolEntry[] = [
     description: "Extract concise, source-language key points from your PDF.",
     category: "ai",
   },
+  {
+    slug: "ask-pdf",
+    name: "Ask PDF",
+    description: "Ask questions using only your PDF's extractable text.",
+    category: "ai",
+  },
 ];
 
 export function getToolBySlug(slug: string): ToolEntry | undefined {
