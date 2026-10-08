@@ -229,7 +229,7 @@ describe("SummarizePdfCard", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Cancel/i }));
     });
-    expect(runtimeCancelSpy).toHaveBeenCalled();
+    await waitFor(() => expect(runtimeCancelSpy).toHaveBeenCalled());
     // Simulate cancelled error
     const cancelErr = new Error("cancelled");
     cancelErr.name = "AiGenerationCancelledError";
@@ -252,6 +252,67 @@ describe("SummarizePdfCard", () => {
       fireEvent.click(screen.getByRole("button", { name: /Summarize PDF/i }));
     });
     expect(await screen.findByText("second summary")).toBeInTheDocument();
+  });
+
+  it("cancellation allows an immediate retry without a concurrent-generation error", async () => {
+    let resolve!: (value: unknown) => void;
+    mockedRun.mockImplementationOnce(
+      () => new Promise((res) => {
+        resolve = res as unknown as (value: unknown) => void;
+      }),
+    );
+    render(<SummarizePdfCard />);
+    await act(async () => {
+      fireEvent.change(getFileInput(), { target: { files: [makePdfFile()] } });
+      fireEvent.click(screen.getByRole("button", { name: /Summarize PDF/i }));
+    });
+    await screen.findByRole("button", { name: /Cancel/i });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Cancel/i }));
+    });
+    expect(await screen.findByText(/Generation cancelled/i)).toBeInTheDocument();
+
+    mockedRun.mockResolvedValueOnce({
+      text: "retry summary",
+      providerId: "browser-ai",
+      chunks: [{ chunkIndex: 0, pageNumber: 1, text: "hello", startOffset: 0, endOffset: 5 }],
+      sourcePageCount: 1,
+      pagesWithoutText: [],
+      truncated: false,
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Summarize PDF/i }));
+    });
+    expect(await screen.findByText("retry summary")).toBeInTheDocument();
+    resolve({
+      text: "late summary",
+      providerId: "browser-ai",
+      chunks: [{ chunkIndex: 0, pageNumber: 1, text: "hello", startOffset: 0, endOffset: 5 }],
+      sourcePageCount: 1,
+      pagesWithoutText: [],
+      truncated: false,
+    });
+  });
+
+  it("cancelled state offers a way to choose another PDF", async () => {
+    const cancelError = new Error("cancelled");
+    cancelError.name = "AiGenerationCancelledError";
+    mockedRun.mockRejectedValueOnce(cancelError);
+    render(<SummarizePdfCard />);
+    await act(async () => {
+      fireEvent.change(getFileInput(), { target: { files: [makePdfFile()] } });
+      fireEvent.click(screen.getByRole("button", { name: /Summarize PDF/i }));
+    });
+
+    await screen.findByText(/Generation cancelled/i);
+    expect(screen.getByRole("button", { name: /Choose another PDF/i })).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Choose another PDF/i }));
+    });
+    expect(screen.queryByText("test.pdf")).not.toBeInTheDocument();
+    expect(screen.getByText(/Choose a PDF to summarize/i)).toBeInTheDocument();
   });
 
   it("truncation disclosure appears when truncated true", async () => {

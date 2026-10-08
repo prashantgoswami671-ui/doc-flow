@@ -35,6 +35,7 @@ export interface RunAiActionOnPdfOptions {
   file: File;
   action: AiPresetAction;
   runtime: AiRuntime;
+  isCancellationRequested?: () => boolean;
   userQuestion?: string;
   targetLanguage?: string;
   pageNumbers?: number[];
@@ -80,6 +81,12 @@ export async function runAiActionOnPdf(
 
   if (context.chunks.length === 0) {
     throw new AiEmptyContextError();
+  }
+
+  if (options.isCancellationRequested?.()) {
+    const cancellationError = new Error("Generation cancelled.");
+    cancellationError.name = "AiGenerationCancelledError";
+    throw cancellationError;
   }
 
   const prompt = buildAiInstructionPrompt({

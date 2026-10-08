@@ -62,6 +62,7 @@ function tier2ErrorMessage(err: Tier2ServiceError): string {
 
 export default function SummarizePdfCard() {
   const isProcessingRef = useRef(false);
+  const cancellationRequestedRef = useRef(false);
   const requestIdRef = useRef(0);
   const runtimeRef = useRef<AiRuntime | null>(null);
   const ollamaMetaRef = useRef<OllamaRuntime | null>(null);
@@ -200,9 +201,27 @@ export default function SummarizePdfCard() {
   };
 
   const handleCancel = () => {
-    const runtime = runtimeRef.current as unknown as { cancel?: () => void } | null;
+    const runtime = runtimeRef.current as unknown as {
+      cancel?: () => void;
+      dispose?: () => void;
+    } | null;
+
+    cancellationRequestedRef.current = true;
+    requestIdRef.current += 1;
+    isProcessingRef.current = false;
+    setIsProcessing(false);
+    setProcessingStage(null);
+    setError("Generation cancelled.");
+    setErrorKind("cancelled");
+
+    // Retire the runtime immediately so a retry cannot reuse a generation
+    // that is still settling after cancellation.
+    runtimeRef.current = null;
     if (runtime && typeof runtime.cancel === "function") {
       runtime.cancel();
+    }
+    if (runtime && typeof runtime.dispose === "function") {
+      window.setTimeout(() => runtime.dispose?.(), 0);
     }
   };
 
@@ -245,6 +264,7 @@ export default function SummarizePdfCard() {
     }
 
     const requestId = ++requestIdRef.current;
+    cancellationRequestedRef.current = false;
     isProcessingRef.current = true;
     setIsProcessing(true);
     setProcessingStage("extracting");
@@ -279,6 +299,7 @@ export default function SummarizePdfCard() {
           file: selectedFile,
           action: "summarize",
           runtime,
+          isCancellationRequested: () => cancellationRequestedRef.current,
         });
 
         if (requestId !== requestIdRef.current) return;
@@ -644,6 +665,15 @@ export default function SummarizePdfCard() {
                 className="rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
               >
                 Cancel
+              </button>
+            )}
+            {selectedFile && !isProcessing && !result && !tier2Result && (
+              <button
+                type="button"
+                onClick={handleReset}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+              >
+                Choose another PDF
               </button>
             )}
           </div>

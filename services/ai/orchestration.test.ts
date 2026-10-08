@@ -220,6 +220,22 @@ describe("runAiActionOnPdf", () => {
     );
   });
 
+  it("cancellation requested after extraction stops before generation", async () => {
+    const bytes = await buildTextVectorPdfBytes(1);
+    const runtime = new FakeRuntime();
+    const isCancellationRequested = vi.fn(() => true);
+
+    await expect(
+      runAiActionOnPdf({
+        file: toFile(bytes),
+        action: "summarize",
+        runtime,
+        isCancellationRequested,
+      }),
+    ).rejects.toMatchObject({ name: "AiGenerationCancelledError" });
+    expect(runtime.lastRequest).toBeNull();
+  });
+
   it("runtime receives only prompt and contextChunks", async () => {
     const bytes = await buildTextVectorPdfBytes(1);
     const runtime = new FakeRuntime();
