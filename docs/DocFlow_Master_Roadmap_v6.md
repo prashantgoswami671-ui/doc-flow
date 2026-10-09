@@ -50,8 +50,8 @@ The 2026-09-18 read-only audit established the following baseline.
 ## 1.1 Git state
 
 - Branch: `main`
-- Current published HEAD: `65bbef4a862c59279c944803896262d3d42f9f83` (`feat: add AI-07 ask pdf`)
-- `origin/main` points to the same published commit.
+- Code baseline: `811d8199efcbaec7b33a91a12af1e838e3a45556` (`fix: improve browser summary cancellation`), published and clean.
+- Docs last reconciled at `552965d` and corrected in a later docs-only commit.
 - Tracked working tree: clean.
 - Suspicious zero-byte root-level files remain untracked and untouched.
 - `benchmark-docs/` remains ignored and must stay out of normal commits unless a future governance decision explicitly changes that.
@@ -82,7 +82,7 @@ Current production Browser AI characteristics:
 - Production output is bounded to 256 new tokens.
 - Lifecycle, cancellation, disposal, and stale-worker protections are tested.
 - Summarize PDF, Translate PDF, Key Points, and Ask PDF are current production AI features.
-- Real Browser AI E2E coverage exists, but the latest recorded Browser Summarize run timed out under the environment-gated WASM path; Brave/manual QA is not yet recorded as complete.
+- Real Browser AI E2E coverage exists. An earlier recorded Browser Summarize run timed out under the environment-gated WASM path; newer definitive-failure evidence (WASM inference-session creation `std::bad_alloc`, including with a warm cache; cause unproven — fails safely with an explicit error, no fallback) is recorded in `docs/DOCFLOW_STATUS.md` (Tier-1 Browser AI closure status). Brave/manual QA is not yet recorded as complete, and Browser AI closure remains open.
 
 ## 1.3 Tier 2 — Ollama
 
@@ -672,7 +672,7 @@ No claim should be stronger than its evidence.
 The original v6 starting point is historical. The current published state is:
 
 ```text
-Repository baseline                         ✅ `65bbef4` published and clean
+Repository baseline                         ✅ `811d8199` published and clean (code baseline; docs last reconciled at `552965d` plus later docs-only correction)
 Tier-1 Browser AI runtime                   ✅
 Tier-1 production Summarize                ✅
 Tier-1 production Translate/Key Points/Ask ✅

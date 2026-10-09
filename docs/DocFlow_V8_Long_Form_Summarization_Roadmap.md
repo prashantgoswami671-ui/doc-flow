@@ -378,7 +378,7 @@ Do not mark later tasks complete merely because the roadmap exists.
 Record:
 
 - V7 published architecture is the starting baseline: PDF extraction/chunking → Stage-1 RED3 exact-span acquisition → B03/B04 Evidence Store → V7-A02 balanced 24-item selection → V7-A04.2 page/chunk/sourcePageCount context → Stage-2 → C02 → C03 → grounded UI.
-- Latest published commit: `5c402f7`.
+- V8 start baseline (commit `5c402f7`).
 - 22-page local-only benchmark:
   - 20 text-bearing pages
   - 2 image-only pages
