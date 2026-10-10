@@ -286,13 +286,15 @@ export function createOllamaClient(options: OllamaClientOptions = {}): OllamaCli
      * Same request as generate(), but also surfaces the metric fields
      * Ollama returns with the /api/generate response (token counts and
      * durations). Additive — generate() behavior is unchanged.
+     * Sends think:false for parity with the generic generate() path
+     * (no format field); used by benchmarks/callers of generic text.
      */
     async generateDetailed(
       prompt: string,
       contextChunks?: { text: string; pageNumber: number; chunkIndex: number }[],
       settings?: { temperature?: number; maxOutputTokens?: number },
     ): Promise<OllamaGenerateDetailedResult> {
-      const requestBody = buildGenerateRequestBody(prompt, contextChunks, settings);
+      const requestBody = buildGenerateRequestBody(prompt, contextChunks, settings, { think: false });
 
       try {
         const response = await request<OllamaGenerateResponse>(OLLAMA_API_GENERATE, {

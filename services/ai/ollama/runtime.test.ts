@@ -36,6 +36,7 @@ interface MockOllamaClient {
     prompt: string;
     contextChunks?: { text: string; pageNumber: number; chunkIndex: number }[];
     settings?: { temperature?: number; maxOutputTokens?: number };
+    transport?: { think?: boolean; format?: unknown };
   } | null;
   shouldFailAvailability: boolean;
   shouldFailGenerate: boolean;
@@ -68,8 +69,9 @@ function createMockClient(overrides: Partial<MockOllamaClient> = {}): MockOllama
     prompt: string,
     contextChunks?: { text: string; pageNumber: number; chunkIndex: number }[],
     settings?: { temperature?: number; maxOutputTokens?: number },
+    transport?: { think?: boolean; format?: unknown },
   ) => {
-    client.lastGenerateCall = { prompt, contextChunks, settings };
+    client.lastGenerateCall = { prompt, contextChunks, settings, transport };
     if (client.shouldFailGenerate && client.failGenerateError) {
       throw client.failGenerateError;
     }
@@ -290,6 +292,97 @@ describe("OllamaRuntime.generateText contract", () => {
     // Resolve the first to clean up
     resolveGenerate!("done");
     await expect(first).resolves.toBeDefined();
+  });
+
+  it("passes think:false (and no format) to the client on the generic path", async () => {
+    const mockClient = createMockClient();
+    const runtime = runtimeWithMockClient(mockClient);
+
+    await runtime.generateText({ prompt: "Translate this." });
+
+    expect(mockClient.generate).toHaveBeenCalledTimes(1);
+    expect(mockClient.lastGenerateCall?.transport).toEqual({ think: false });
+  });
+});
+
+describe("OllamaRuntime generic think:false wire body", () => {
+  it("generic generateText sends think === false and no format key to /api/generate", async () => {
+    const captured: { init: RequestInit | null } = { init: null };
+    const mockFetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      captured.init = init ?? null;
+      return {
+        ok: true,
+        json: async () => ({
+          model: OLLAMA_MODEL,
+          created_at: new Date().toISOString(),
+          response: "translated text",
+          done: true,
+        }),
+      } as Response;
+    });
+    const runtime = new OllamaRuntime({
+      clientFactory: () => createOllamaClient({ fetchImpl: mockFetch }),
+      availabilityCheck: availableAlways,
+    });
+
+    const result = await runtime.generateText({ prompt: "Translate this." });
+
+    expect(result.text).toBe("translated text");
+    const body = JSON.parse(captured.init?.body as string);
+    expect(body.think).toBe(false);
+    expect(body).not.toHaveProperty("format");
+  });
+
+  it("structured request body is unchanged (think false plus format schema)", async () => {
+    const captured: { init: RequestInit | null } = { init: null };
+    const mockFetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      captured.init = init ?? null;
+      return {
+        ok: true,
+        json: async () => ({
+          model: OLLAMA_MODEL,
+          created_at: new Date().toISOString(),
+          response: "[]",
+          done: true,
+        }),
+      } as Response;
+    });
+    const runtime = new OllamaRuntime({
+      clientFactory: () => createOllamaClient({ fetchImpl: mockFetch }),
+      availabilityCheck: availableAlways,
+    });
+
+    await runtime.generateStructuredText({
+      prompt: "extract",
+      format: { type: "array", items: { type: "string" } },
+      settings: { temperature: 0, maxOutputTokens: 64 },
+    });
+
+    const body = JSON.parse(captured.init?.body as string);
+    expect(body.think).toBe(false);
+    expect(body.format).toEqual({ type: "array", items: { type: "string" } });
+  });
+
+  it("returns an empty string without throwing when the server returns response:\"\" with done:true", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: OLLAMA_MODEL,
+        created_at: new Date().toISOString(),
+        response: "",
+        done: true,
+      }),
+    } as Response);
+
+    const client = createOllamaClient({ fetchImpl: mockFetch });
+    await expect(client.generate("Translate this.")).resolves.toBe("");
+
+    const runtime = new OllamaRuntime({
+      clientFactory: () => createOllamaClient({ fetchImpl: mockFetch }),
+      availabilityCheck: availableAlways,
+    });
+    const result = await runtime.generateText({ prompt: "Translate this." });
+    expect(result.text).toBe("");
   });
 });
 
@@ -571,6 +664,9 @@ describe("createOllamaClient", () => {
     expect(body.model).toBe(OLLAMA_MODEL);
     expect(body.stream).toBe(false);
     expect(body.options).toEqual({ temperature: 0.4, num_predict: 128 });
+    // Generic-path parity: think disabled, no structured format.
+    expect(body.think).toBe(false);
+    expect(body).not.toHaveProperty("format");
   });
 
   it("generateDetailed reports null metrics when Ollama omits them (never fabricated)", async () => {

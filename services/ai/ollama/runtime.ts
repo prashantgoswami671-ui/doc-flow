@@ -258,6 +258,11 @@ export class OllamaRuntime implements AiRuntime {
           temperature: request.settings?.temperature,
           maxOutputTokens: resolveMaxOutputTokens(request.settings?.maxOutputTokens),
         },
+        // Generic text path: disable model thinking so the whole
+        // num_predict budget goes to the answer (qwen3:4b otherwise
+        // spends it on reasoning and returns an empty response).
+        // No `format` field here — free text, unlike generateStructuredText.
+        { think: false },
       );
 
       return {
