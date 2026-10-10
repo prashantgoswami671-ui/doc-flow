@@ -76,6 +76,8 @@ export interface OllamaGenerateResponse {
   created_at: string;
   response: string;
   done: boolean;
+  /** Why generation stopped ("stop" normally, "length" when num_predict ran out). Absent on older servers. */
+  done_reason?: string;
   context?: number[];
   total_duration?: number;
   load_duration?: number;

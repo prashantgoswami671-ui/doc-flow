@@ -65,6 +65,13 @@ export class OllamaRuntimeDisposedError extends Error {
 export interface OllamaTextGenerationResult extends AiTextGenerationResult {
   /** True when one or more supplied context chunks were dropped to stay within `OLLAMA_MAX_CONTEXT_CHARACTERS`. */
   contextTruncated: boolean;
+  /**
+   * True only when Ollama reported done_reason "length" (num_predict ran
+   * out, so the answer may be cut off). Optional and only ever present
+   * when true, so exact-shape assertions on the false case stay stable;
+   * absent for Browser runtimes, which have no such signal.
+   */
+  outputTruncated?: boolean;
 }
 
 export const OLLAMA_CAPABILITIES: AiCapabilities = {
@@ -247,29 +254,55 @@ export class OllamaRuntime implements AiRuntime {
         this.client = this.clientFactory();
       }
 
-      const text = await this.client.generate(
-        request.prompt,
-        boundedChunks.map((c) => ({
-          text: c.text,
-          pageNumber: c.pageNumber,
-          chunkIndex: c.chunkIndex,
-        })),
-        {
-          temperature: request.settings?.temperature,
-          maxOutputTokens: resolveMaxOutputTokens(request.settings?.maxOutputTokens),
-        },
-        // Generic text path: disable model thinking so the whole
-        // num_predict budget goes to the answer (qwen3:4b otherwise
-        // spends it on reasoning and returns an empty response).
-        // No `format` field here — free text, unlike generateStructuredText.
-        { think: false },
-      );
+      const contextArg = boundedChunks.map((c) => ({
+        text: c.text,
+        pageNumber: c.pageNumber,
+        chunkIndex: c.chunkIndex,
+      }));
+      const settingsArg = {
+        temperature: request.settings?.temperature,
+        maxOutputTokens: resolveMaxOutputTokens(request.settings?.maxOutputTokens),
+      };
+      // Generic text path: disable model thinking so the whole
+      // num_predict budget goes to the answer (qwen3:4b otherwise
+      // spends it on reasoning and returns an empty response).
+      // No `format` field here — free text, unlike generateStructuredText.
+      const transportArg = { think: false } as const;
+
+      // Prefer the additive text+reason call so output truncation
+      // (done_reason "length") is surfaced; fall back to generate()
+      // for older client implementations without it (benchmark
+      // wrappers, test doubles), which simply report no signal.
+      const withReason = this.client.generateWithReason;
+      let text: string;
+      let outputTruncated = false;
+      if (typeof withReason === "function") {
+        const detailed = await withReason.call(
+          this.client,
+          request.prompt,
+          contextArg,
+          settingsArg,
+          transportArg,
+        );
+        text = detailed.text;
+        outputTruncated = detailed.doneReason === "length";
+      } else {
+        text = await this.client.generate(
+          request.prompt,
+          contextArg,
+          settingsArg,
+          transportArg,
+        );
+      }
 
       return {
         text,
         providerId: this.capabilities.providerId,
         runtime: this.capabilities.runtime,
         contextTruncated,
+        // Only present when true: keeps exact-shape assertions on the
+        // common non-truncated case stable.
+        ...(outputTruncated ? { outputTruncated: true as const } : {}),
       };
     } finally {
       this.inFlight = false;

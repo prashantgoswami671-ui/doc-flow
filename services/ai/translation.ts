@@ -102,6 +102,20 @@ function hasUnbalancedDelimiters(text: string): boolean {
   return stack.length > 0;
 }
 
+/**
+ * True only when the runtime explicitly reported output truncation
+ * (Ollama done_reason "length"). Detected safely via an `in`-check so
+ * runtimes without the provider-local field (Browser AI) behave
+ * exactly as before. Checked after the empty-text guard, so empty
+ * output keeps the existing "failed" handling.
+ */
+function isOutputTruncated(result: { text: string }): boolean {
+  return (
+    "outputTruncated" in (result as unknown as Record<string, unknown>) &&
+    (result as unknown as Record<string, unknown>).outputTruncated === true
+  );
+}
+
 function isObviouslyTruncated(text: string, runtime: AiRuntime): boolean {
   if (text.length >= runtime.capabilities.maxOutputCharacters) return true;
   if (runtime.capabilities.providerId !== "browser-ai") return false;
@@ -192,7 +206,7 @@ export async function translatePdf(options: TranslatePdfOptions): Promise<Transl
 
       if (!result.text.trim()) {
         translatedChunks.push(toTranslatedChunk(chunk, "", "failed", "The provider returned no translation."));
-      } else if (isObviouslyTruncated(result.text, options.runtime)) {
+      } else if (isOutputTruncated(result) || isObviouslyTruncated(result.text, options.runtime)) {
         truncated = true;
         translatedChunks.push(
           toTranslatedChunk(chunk, result.text, "truncated", "The provider output reached its limit."),

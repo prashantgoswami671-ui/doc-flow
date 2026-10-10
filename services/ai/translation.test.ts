@@ -34,11 +34,22 @@ function runtime(response = "translated") {
       maxOutputCharacters: 1024,
     },
     checkAvailability: vi.fn(),
-    generateText: vi.fn(async ({ contextChunks }: { contextChunks?: { text: string }[] }) => ({
-      text: `${response}:${contextChunks?.[0]?.text}`,
-      providerId: "test",
-      runtime: "browser" as const,
-    })),
+    generateText: vi.fn(
+      async ({
+        contextChunks,
+      }: {
+        contextChunks?: { text: string }[];
+      }): Promise<{
+        text: string;
+        providerId: string;
+        runtime: "browser";
+        outputTruncated?: boolean;
+      }> => ({
+        text: `${response}:${contextChunks?.[0]?.text}`,
+        providerId: "test",
+        runtime: "browser" as const,
+      }),
+    ),
   };
 }
 
@@ -189,6 +200,47 @@ describe("translation", () => {
     });
 
     expect(result.chunks[0].status).toBe("truncated");
+  });
+
+  it("marks a chunk truncated when the runtime reports outputTruncated", async () => {
+    const fake = runtime();
+    fake.generateText.mockResolvedValue({
+      text: "cut off text",
+      providerId: "test",
+      runtime: "browser",
+      outputTruncated: true,
+    });
+
+    const result = await translatePdf({
+      file: new File(["pdf"], "test.pdf", { type: "application/pdf" }),
+      targetLanguage: "Bengali",
+      runtime: fake,
+    });
+
+    expect(result.chunks.map((chunk) => chunk.status)).toEqual(["truncated", "truncated"]);
+    expect(result.chunks[0].error).toBe("The provider output reached its limit.");
+    expect(result.status).toBe("partial");
+    expect(result.truncated).toBe(true);
+    expect(result.failedChunkIndexes).toEqual([0, 1]);
+  });
+
+  it("treats outputTruncated false like an absent signal", async () => {
+    const fake = runtime();
+    fake.generateText.mockResolvedValue({
+      text: "complete text",
+      providerId: "test",
+      runtime: "browser",
+      outputTruncated: false,
+    });
+
+    const result = await translatePdf({
+      file: new File(["pdf"], "test.pdf", { type: "application/pdf" }),
+      targetLanguage: "Bengali",
+      runtime: fake,
+    });
+
+    expect(result.chunks.every((chunk) => chunk.status === "translated")).toBe(true);
+    expect(result.status).toBe("ready");
   });
 
   it("stops new work after cancellation", async () => {

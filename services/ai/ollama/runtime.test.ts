@@ -386,6 +386,142 @@ describe("OllamaRuntime generic think:false wire body", () => {
   });
 });
 
+describe("OllamaRuntime output truncation signal", () => {
+  function runtimeWithReasonClient(doneReason: unknown) {
+    const generateWithReason = vi.fn().mockResolvedValue({ text: "partial text", doneReason });
+    const client = {
+      checkAvailability: vi.fn().mockResolvedValue({ available: true }),
+      generate: vi.fn().mockResolvedValue("unused"),
+      generateWithReason,
+      showModel: vi.fn().mockResolvedValue({}),
+    };
+    const runtime = new OllamaRuntime({
+      clientFactory: () => client as unknown as ReturnType<typeof createOllamaClient>,
+      availabilityCheck: availableAlways,
+    });
+    return { runtime, generateWithReason };
+  }
+
+  function wireRuntime(responseJson: Record<string, unknown>) {
+    const captured: { init: RequestInit | null } = { init: null };
+    const mockFetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      captured.init = init ?? null;
+      return {
+        ok: true,
+        json: async () => ({
+          model: OLLAMA_MODEL,
+          created_at: new Date().toISOString(),
+          response: "partial text",
+          done: true,
+          ...responseJson,
+        }),
+      } as Response;
+    });
+    const runtime = new OllamaRuntime({
+      clientFactory: () => createOllamaClient({ fetchImpl: mockFetch }),
+      availabilityCheck: availableAlways,
+    });
+    return { runtime, captured, mockFetch };
+  }
+
+  it("sets outputTruncated when done_reason is length", async () => {
+    const { runtime, generateWithReason } = runtimeWithReasonClient("length");
+
+    const result = await runtime.generateText({ prompt: "Translate this." });
+
+    expect(result.text).toBe("partial text");
+    expect(result.outputTruncated).toBe(true);
+    // Reason call carries the same generic transport (think disabled, no format).
+    expect(generateWithReason.mock.calls[0]?.[3]).toEqual({ think: false });
+  });
+
+  it("omits outputTruncated when done_reason is stop", async () => {
+    const { runtime } = runtimeWithReasonClient("stop");
+
+    const result = await runtime.generateText({ prompt: "Translate this." });
+
+    expect(result.text).toBe("partial text");
+    expect(result).not.toHaveProperty("outputTruncated");
+  });
+
+  it("omits outputTruncated when done_reason is missing", async () => {
+    const generateWithReason = vi.fn().mockResolvedValue({ text: "partial text" });
+    const client = {
+      checkAvailability: vi.fn().mockResolvedValue({ available: true }),
+      generate: vi.fn().mockResolvedValue("unused"),
+      generateWithReason,
+      showModel: vi.fn().mockResolvedValue({}),
+    };
+    const runtime = new OllamaRuntime({
+      clientFactory: () => client as unknown as ReturnType<typeof createOllamaClient>,
+      availabilityCheck: availableAlways,
+    });
+
+    const result = await runtime.generateText({ prompt: "Translate this." });
+
+    expect(result).not.toHaveProperty("outputTruncated");
+  });
+
+  it("falls back to generate() without a signal for clients lacking generateWithReason", async () => {
+    const mockClient = createMockClient();
+    const runtime = runtimeWithMockClient(mockClient);
+
+    const result = await runtime.generateText({ prompt: "Translate this." });
+
+    expect(result.text).toBe("generated text");
+    expect(result).not.toHaveProperty("outputTruncated");
+    expect(mockClient.generate).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces done_reason length end to end over the wire", async () => {
+    const { runtime, captured } = wireRuntime({ done_reason: "length" });
+
+    const result = await runtime.generateText({ prompt: "Translate this." });
+
+    expect(result.outputTruncated).toBe(true);
+    const body = JSON.parse(captured.init?.body as string);
+    expect(body.think).toBe(false);
+    expect(body).not.toHaveProperty("format");
+  });
+
+  it("generateDetailed reports doneReason and keeps metrics behavior", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: OLLAMA_MODEL,
+        created_at: new Date().toISOString(),
+        response: "partial text",
+        done: true,
+        done_reason: "length",
+        eval_count: 2048,
+      }),
+    } as Response);
+
+    const client = createOllamaClient({ fetchImpl: mockFetch });
+    const detailed = await client.generateDetailed("Translate this.");
+
+    expect(detailed.text).toBe("partial text");
+    expect(detailed.doneReason).toBe("length");
+    expect(detailed.evalCount).toBe(2048);
+  });
+
+  it("generateDetailed reports doneReason null when the server omits done_reason", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: OLLAMA_MODEL,
+        created_at: new Date().toISOString(),
+        response: "complete text",
+        done: true,
+      }),
+    } as Response);
+
+    const client = createOllamaClient({ fetchImpl: mockFetch });
+
+    expect((await client.generateDetailed("Translate this.")).doneReason).toBeNull();
+  });
+});
+
 describe("boundContextChunks", () => {
   it("returns empty truncated=false for empty array", () => {
     expect(boundContextChunks([], OLLAMA_MAX_CONTEXT_CHARACTERS)).toEqual({

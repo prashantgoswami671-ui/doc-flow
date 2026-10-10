@@ -102,6 +102,24 @@ export interface OllamaGenerateDetailedResult {
   loadDurationMs: number | null;
   promptEvalDurationMs: number | null;
   evalDurationMs: number | null;
+  /** Raw done_reason from /api/generate ("length" when num_predict ran out); null when unreported. */
+  doneReason: string | null;
+}
+
+/**
+ * Text plus the raw stop reason for a single /api/generate call.
+ * Lets the runtime derive output-truncation without changing the
+ * existing generate() string contract.
+ */
+export interface OllamaGenerateWithReasonResult {
+  text: string;
+  /** Raw done_reason ("length" when num_predict ran out); null when unreported. */
+  doneReason: string | null;
+}
+
+/** Extracts done_reason defensively: string when reported, null otherwise (never fabricated). */
+function toDoneReason(response: OllamaGenerateResponse): string | null {
+  return typeof response.done_reason === "string" ? response.done_reason : null;
 }
 
 const DOCUMENT_CONTEXT_START = "<<<DOCUMENT_CONTEXT_START>>>";
@@ -315,7 +333,37 @@ export function createOllamaClient(options: OllamaClientOptions = {}): OllamaCli
           loadDurationMs: nanosecondsToMilliseconds(response.load_duration),
           promptEvalDurationMs: nanosecondsToMilliseconds(response.prompt_eval_duration),
           evalDurationMs: nanosecondsToMilliseconds(response.eval_duration),
+          doneReason: toDoneReason(response),
         };
+      } catch (error) {
+        throw toGenerateError(error);
+      }
+    },
+
+    /**
+     * Same wire request as generate(), but returns the text alongside the
+     * raw done_reason so callers can detect output truncation
+     * (done_reason "length"). Additive — generate() behavior is unchanged.
+     */
+    async generateWithReason(
+      prompt: string,
+      contextChunks?: { text: string; pageNumber: number; chunkIndex: number }[],
+      settings?: { temperature?: number; maxOutputTokens?: number },
+      transport?: OllamaTransportOptions,
+    ): Promise<OllamaGenerateWithReasonResult> {
+      const requestBody = buildGenerateRequestBody(prompt, contextChunks, settings, transport);
+
+      try {
+        const response = await request<OllamaGenerateResponse>(OLLAMA_API_GENERATE, {
+          method: "POST",
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.done) {
+          throw new OllamaGenerationError("Ollama generation did not complete (done=false)", null, OLLAMA_API_GENERATE);
+        }
+
+        return { text: response.response, doneReason: toDoneReason(response) };
       } catch (error) {
         throw toGenerateError(error);
       }
@@ -347,5 +395,17 @@ export interface OllamaClient {
     contextChunks?: { text: string; pageNumber: number; chunkIndex: number }[],
     settings?: { temperature?: number; maxOutputTokens?: number },
   ): Promise<OllamaGenerateDetailedResult>;
+  /**
+   * Additive text+reason variant of generate(). Optional so older
+   * OllamaClient implementations (test doubles, benchmark wrappers)
+   * without it still satisfy the interface; runtimes must fall back
+   * to generate() when it is absent.
+   */
+  generateWithReason?(
+    prompt: string,
+    contextChunks?: { text: string; pageNumber: number; chunkIndex: number }[],
+    settings?: { temperature?: number; maxOutputTokens?: number },
+    transport?: OllamaTransportOptions,
+  ): Promise<OllamaGenerateWithReasonResult>;
   showModel(): Promise<OllamaShowResponse>;
 }
