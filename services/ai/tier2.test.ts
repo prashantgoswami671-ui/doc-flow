@@ -239,7 +239,12 @@ describe("GENERATION", () => {
     expect(generateBodies).toHaveLength(1);
     const body = generateBodies[0] as Record<string, unknown>;
     for (const key of Object.keys(body)) {
-      expect(["model", "prompt", "stream", "options"]).toContain(key);
+      expect(["model", "prompt", "stream", "options", "think"]).toContain(key);
+    }
+    // The generic Ollama text path now sends think:false (reasoning
+    // disabled); no other new key is allowed.
+    if ("think" in body) {
+      expect(body["think"]).toBe(false);
     }
     expect(typeof body["prompt"]).toBe("string");
   });
