@@ -103,9 +103,18 @@ function buildTranslateInstruction(options: BuildAiInstructionOptions): string {
     );
   }
 
+  // Phase 0 translation-quality gate: the previous prompt ("Preserve the
+  // meaning and important details.") accepted reasoning, introductions,
+  // and explanations as valid translations. This instruction requires
+  // output-only translation so validator failures downstream are prompt
+  // violations, not ambiguous outputs.
   return composeInstruction(
     `Translate the document context below into ${targetLanguage}. ` +
-      "Preserve the meaning and important details.",
+      `Output ONLY the ${targetLanguage} translation — no reasoning, ` +
+      "no introduction, no explanation, no commentary, and no source-text " +
+      "preamble. Preserve the meaning, numbers, names, and paragraph " +
+      "breaks of the source. Translate completely; do not truncate, " +
+      "summarize, or omit content.",
     options,
   );
 }

@@ -41,6 +41,29 @@ describe("buildAiInstructionPrompt", () => {
       expect(prompt.toLowerCase()).toContain("translate");
     });
 
+    it("requires output-only translation with no reasoning or commentary", () => {
+      const prompt = buildAiInstructionPrompt({
+        action: "translate",
+        targetLanguage: "Bengali",
+      });
+
+      expect(prompt).toContain("Bengali");
+      expect(prompt).toMatch(/output only/i);
+      expect(prompt.toLowerCase()).toContain("no reasoning");
+      expect(prompt.toLowerCase()).toContain("no explanation");
+      expect(prompt.toLowerCase()).not.toContain("ocr");
+    });
+
+    it("requires complete translation without truncation or omission", () => {
+      const prompt = buildAiInstructionPrompt({
+        action: "translate",
+        targetLanguage: "Spanish",
+      });
+
+      expect(prompt.toLowerCase()).toContain("do not truncate");
+      expect(prompt.toLowerCase()).toContain("omit");
+    });
+
     it("throws when targetLanguage is missing", () => {
       expect(() => buildAiInstructionPrompt({ action: "translate" })).toThrow(
         AiInstructionValidationError,
