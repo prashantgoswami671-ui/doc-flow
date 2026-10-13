@@ -675,7 +675,7 @@ The original v6 starting point is historical. The current published state is:
 Repository baseline                         ✅ `811d8199` published and clean (code baseline; docs last reconciled at `552965d` plus later docs-only correction)
 Tier-1 Browser AI runtime                   🟡 unit-test verified; live Browser inference OPEN/BLOCKED in the tested environment (WASM std::bad_alloc)
 Tier-1 production Summarize                🟡 unit-test verified; live Browser inference OPEN/BLOCKED in the tested environment (WASM std::bad_alloc)
-Tier-1 production Translate/Key Points/Ask 🟡 unit-test verified; live Browser inference OPEN/BLOCKED in the tested environment (WASM std::bad_alloc); no manual QA recorded
+Tier-1 production Translate/Key Points/Ask 🟡 unit-test verified; live Browser inference OPEN/BLOCKED in the tested environment (WASM std::bad_alloc); descriptive single-sample live-Ollama evidence recorded in DOCFLOW_STATUS.md (AI-05/06/07); manual QA: none
 Tier-1 egress guard                         ✅
 Tier-2 Ollama runtime/UI/consent            ✅
 Production Evidence Store                   ✅ Tier-2 validated path
