@@ -363,6 +363,40 @@ describe("OllamaRuntime generic think:false wire body", () => {
     expect(body.format).toEqual({ type: "array", items: { type: "string" } });
   });
 
+  it("structured generation forwards optional context chunks as page payloads", async () => {
+    const mockClient = createMockClient();
+    const runtime = runtimeWithMockClient(mockClient);
+    const chunk = makeChunk({ chunkIndex: 2, pageNumber: 5, text: "source text", startOffset: 10, endOffset: 21 });
+
+    await runtime.generateStructuredText({
+      prompt: "extract",
+      format: { type: "object", properties: { points: { type: "array", items: { type: "string" } } }, required: ["points"] },
+      settings: { temperature: 0, maxOutputTokens: 256 },
+      contextChunks: [chunk],
+    });
+
+    expect(mockClient.lastGenerateCall?.contextChunks).toEqual([
+      { text: "source text", pageNumber: 5, chunkIndex: 2 },
+    ]);
+    expect(mockClient.lastGenerateCall?.transport).toEqual({
+      think: false,
+      format: expect.objectContaining({ type: "object" }),
+    });
+  });
+
+  it("structured generation without context sends undefined context (existing callers unchanged)", async () => {
+    const mockClient = createMockClient();
+    const runtime = runtimeWithMockClient(mockClient);
+
+    await runtime.generateStructuredText({
+      prompt: "extract",
+      format: { type: "array", items: { type: "string" } },
+      settings: { temperature: 0, maxOutputTokens: 64 },
+    });
+
+    expect(mockClient.lastGenerateCall?.contextChunks).toBeUndefined();
+  });
+
   it("returns an empty string without throwing when the server returns response:\"\" with done:true", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,

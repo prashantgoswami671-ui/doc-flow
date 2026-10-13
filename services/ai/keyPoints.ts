@@ -4,6 +4,44 @@ import type { AiContextChunk, AiRuntime } from "./types";
 export const MAX_KEY_POINTS_PER_CHUNK = 3;
 export const MAX_DISPLAY_KEY_POINTS = 20;
 
+/**
+ * Prompt text for one chunk. Shared verbatim by the generic `generateText`
+ * path and the Ollama structured path below, so the instruction the model
+ * sees is identical on both transports.
+ */
+const KEY_POINTS_PROMPT =
+  `Extract at most ${MAX_KEY_POINTS_PER_CHUNK} concise key points from the supplied text. Write each point in the source language. Return only JSON matching {"points":["..."]}; do not add prose or markdown.`;
+
+/**
+ * Structured-output schema for the Ollama `generateStructuredText` path.
+ * Mirrors `parseKeyPointsResponse` bounds (non-empty array, at most
+ * `MAX_KEY_POINTS_PER_CHUNK` strings); the parser still enforces every
+ * bound on the returned text, so a non-conforming structured response is
+ * rejected exactly like a non-conforming free-text one.
+ */
+const KEY_POINTS_RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    points: {
+      type: "array",
+      items: { type: "string" },
+      maxItems: MAX_KEY_POINTS_PER_CHUNK,
+    },
+  },
+  required: ["points"],
+  additionalProperties: false,
+} as const;
+
+/** Provider-local structured seam (same detection shape as Ask PDF). */
+type StructuredKeyPointsRuntime = AiRuntime & {
+  generateStructuredText?: (options: {
+    prompt: string;
+    format: typeof KEY_POINTS_RESPONSE_SCHEMA;
+    settings?: { temperature?: number; maxOutputTokens?: number };
+    contextChunks?: AiContextChunk[];
+  }) => Promise<string>;
+};
+
 export interface KeyPoint {
   pointIndex: number;
   text: string;
@@ -103,16 +141,36 @@ export async function generateKeyPoints(options: KeyPointsOptions): Promise<KeyP
       break;
     }
     try {
-      const response = await options.runtime.generateText({
-        prompt: `Extract at most ${MAX_KEY_POINTS_PER_CHUNK} concise key points from the supplied text. Write each point in the source language. Return only JSON matching {"points":["..."]}; do not add prose or markdown.`,
-        contextChunks: [chunk],
-        settings: { temperature: 0, maxOutputTokens: 256 },
-      });
+      // Ollama runtimes offering structured generation get the same
+      // prompt and the same single chunk through the schema-constrained
+      // transport (think:false + points format); every other runtime —
+      // including Browser AI — keeps the generic generateText path
+      // exactly as before. No provider fallback in either direction.
+      const structuredRuntime = options.runtime as StructuredKeyPointsRuntime;
+      let responseText: string;
+      if (
+        options.runtime.capabilities.providerId === "ollama" &&
+        structuredRuntime.generateStructuredText
+      ) {
+        responseText = await structuredRuntime.generateStructuredText({
+          prompt: KEY_POINTS_PROMPT,
+          contextChunks: [chunk],
+          format: KEY_POINTS_RESPONSE_SCHEMA,
+          settings: { temperature: 0, maxOutputTokens: 256 },
+        });
+      } else {
+        const response = await options.runtime.generateText({
+          prompt: KEY_POINTS_PROMPT,
+          contextChunks: [chunk],
+          settings: { temperature: 0, maxOutputTokens: 256 },
+        });
+        responseText = response.text;
+      }
       if (options.isCancellationRequested?.()) {
         cancelled = true;
         break;
       }
-      const parsed = parseKeyPointsResponse(response.text);
+      const parsed = parseKeyPointsResponse(responseText);
       if (!parsed) {
         failedChunkIndexes.push(chunk.chunkIndex);
       } else {

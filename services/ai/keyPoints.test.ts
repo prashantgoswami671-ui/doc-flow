@@ -78,3 +78,135 @@ describe("key points", () => {
     expect(result.status).toBe("no-text"); expect(r.generateText).not.toHaveBeenCalled();
   });
 });
+
+describe("key points ollama structured experiment", () => {
+  const structuredSchema = {
+    type: "object",
+    properties: {
+      points: { type: "array", items: { type: "string" }, maxItems: 3 },
+    },
+    required: ["points"],
+    additionalProperties: false,
+  };
+
+  const ollamaStructuredRuntime = (outputs: string[]) => {
+    const generateText = vi.fn(async () => ({
+      text: '{"points":["generic-path"]}', providerId: "ollama", runtime: "ollama",
+    }));
+    const generateStructuredText = vi.fn(async () => outputs.shift() ?? '{"points":["fallback"]}');
+    const r = {
+      capabilities: { providerId: "ollama", maxOutputCharacters: 10000, maxContextCharacters: 32768 },
+      generateText,
+      generateStructuredText,
+    } as unknown as AiRuntime;
+    return { runtime: r, generateText, generateStructuredText };
+  };
+
+  const ollamaWithoutStructured = () => {
+    const generateText = vi.fn(async () => ({
+      text: '{"points":["generic-path"]}', providerId: "ollama", runtime: "ollama",
+    }));
+    const r = {
+      capabilities: { providerId: "ollama", maxOutputCharacters: 10000, maxContextCharacters: 32768 },
+      generateText,
+    } as unknown as AiRuntime;
+    return { runtime: r, generateText };
+  };
+
+  it("calls generateStructuredText with the exact schema and chunk, not generateText", async () => {
+    vi.mocked(buildAiTextContext).mockResolvedValue({ chunks: [chunk(0), chunk(1)], sourcePageCount: 2, pagesWithoutText: [], truncated: false, totalCharacters: 18, processingTime: 0 });
+    const { runtime: r, generateText, generateStructuredText } = ollamaStructuredRuntime(['{"points":["A","B"]}', '{"points":["C"]}']);
+    const result = await generateKeyPoints({ file: new File(["x"], "x.pdf"), runtime: r });
+    expect(generateStructuredText).toHaveBeenCalledTimes(2);
+    expect(generateText).not.toHaveBeenCalled();
+    expect(generateStructuredText).toHaveBeenNthCalledWith(1, {
+      prompt: expect.stringContaining("at most 3"),
+      contextChunks: [chunk(0)],
+      format: structuredSchema,
+      settings: { temperature: 0, maxOutputTokens: 256 },
+    });
+    expect(generateStructuredText).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      contextChunks: [chunk(1)],
+      format: structuredSchema,
+    }));
+    expect(result.points.map((p) => p.text)).toEqual(["A", "B", "C"]);
+    expect(result.status).toBe("ready");
+  });
+
+  it("uses generateText when the ollama runtime has no structured method", async () => {
+    vi.mocked(buildAiTextContext).mockResolvedValue({ chunks: [chunk(0)], sourcePageCount: 1, pagesWithoutText: [], truncated: false, totalCharacters: 9, processingTime: 0 });
+    const { runtime: r, generateText } = ollamaWithoutStructured();
+    const result = await generateKeyPoints({ file: new File(["x"], "x.pdf"), runtime: r });
+    expect(generateText).toHaveBeenCalledTimes(1);
+    expect(result.points.map((p) => p.text)).toEqual(["generic-path"]);
+    expect(result.status).toBe("ready");
+  });
+
+  it("keeps the browser-ai path on generateText even if a structured method exists", async () => {
+    vi.mocked(buildAiTextContext).mockResolvedValue({ chunks: [chunk(0)], sourcePageCount: 1, pagesWithoutText: [], truncated: false, totalCharacters: 9, processingTime: 0 });
+    const r = runtime(['{"points":["kept"]}']) as unknown as AiRuntime & { generateStructuredText: ReturnType<typeof vi.fn> };
+    r.generateStructuredText = vi.fn(async () => '{"points":["wrong"]}');
+    const result = await generateKeyPoints({ file: new File(["x"], "x.pdf"), runtime: r });
+    expect(r.generateStructuredText).not.toHaveBeenCalled();
+    expect(result.points.map((p) => p.text)).toEqual(["kept"]);
+    expect(result.status).toBe("ready");
+  });
+
+  it("produces points with source metadata from valid structured output", async () => {
+    vi.mocked(buildAiTextContext).mockResolvedValue({ chunks: [chunk(1, "source-one")], sourcePageCount: 2, pagesWithoutText: [], truncated: false, totalCharacters: 10, processingTime: 0 });
+    const { runtime: r } = ollamaStructuredRuntime(['{"points":["First","Second"]}']);
+    const result = await generateKeyPoints({ file: new File(["x"], "x.pdf"), runtime: r });
+    expect(result.points).toHaveLength(2);
+    expect(result.points[0]).toMatchObject({ pointIndex: 0, sourceChunkIndex: 1, sourcePageNumber: 2, sourceText: "source-one" });
+    expect(result.status).toBe("ready");
+  });
+
+  it("marks malformed structured output as a failed chunk", async () => {
+    vi.mocked(buildAiTextContext).mockResolvedValue({ chunks: [chunk(0)], sourcePageCount: 1, pagesWithoutText: [], truncated: false, totalCharacters: 9, processingTime: 0 });
+    const { runtime: r, generateText } = ollamaStructuredRuntime(["Prose reasoning, not JSON."]);
+    const result = await generateKeyPoints({ file: new File(["x"], "x.pdf"), runtime: r });
+    expect(result.status).toBe("partial");
+    expect(result.failedChunkIndexes).toEqual([0]);
+    expect(result.points).toHaveLength(0);
+    expect(result.providerError).toBeUndefined();
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it("keeps structured provider failure as provider-failed", async () => {
+    vi.mocked(buildAiTextContext).mockResolvedValue({ chunks: [chunk(0), chunk(1)], sourcePageCount: 2, pagesWithoutText: [], truncated: false, totalCharacters: 18, processingTime: 0 });
+    const { runtime: r, generateText, generateStructuredText } = ollamaStructuredRuntime([]);
+    vi.mocked(generateStructuredText).mockRejectedValueOnce(new AiGenerationError("structured generation failed"));
+    const result = await generateKeyPoints({ file: new File(["x"], "x.pdf"), runtime: r });
+    expect(result.status).toBe("provider-failed");
+    expect(result.providerError).toBe("structured generation failed");
+    expect(result.points).toHaveLength(0);
+    expect(generateText).not.toHaveBeenCalled();
+    expect(generateStructuredText).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves cancellation on the structured path", async () => {
+    vi.mocked(buildAiTextContext).mockResolvedValue({ chunks: [chunk(0), chunk(1)], sourcePageCount: 2, pagesWithoutText: [], truncated: false, totalCharacters: 18, processingTime: 0 });
+    const { runtime: r, generateStructuredText } = ollamaStructuredRuntime(['{"points":["first"]}']);
+    const result = await generateKeyPoints({ file: new File(["x"], "x.pdf"), runtime: r, isCancellationRequested: () => true });
+    expect(result.status).toBe("cancelled");
+    expect(result.providerError).toBeUndefined();
+    expect(generateStructuredText).not.toHaveBeenCalled();
+  });
+
+  it("rejects structured output over the three-point limit", async () => {
+    vi.mocked(buildAiTextContext).mockResolvedValue({ chunks: [chunk(0)], sourcePageCount: 1, pagesWithoutText: [], truncated: false, totalCharacters: 9, processingTime: 0 });
+    const { runtime: r } = ollamaStructuredRuntime(['{"points":["1","2","3","4"]}']);
+    const result = await generateKeyPoints({ file: new File(["x"], "x.pdf"), runtime: r });
+    expect(result.status).toBe("partial");
+    expect(result.failedChunkIndexes).toEqual([0]);
+    expect(result.points).toHaveLength(0);
+  });
+
+  it("deduplicates structured output exactly", async () => {
+    vi.mocked(buildAiTextContext).mockResolvedValue({ chunks: [chunk(0), chunk(1)], sourcePageCount: 2, pagesWithoutText: [], truncated: false, totalCharacters: 18, processingTime: 0 });
+    const { runtime: r } = ollamaStructuredRuntime(['{"points":["Same","Unique"]}', '{"points":[" same ","Other"]}']);
+    const result = await generateKeyPoints({ file: new File(["x"], "x.pdf"), runtime: r });
+    expect(result.points.map((p) => p.text)).toEqual(["Same", "Unique", "Other"]);
+    expect(result.status).toBe("ready");
+  });
+});

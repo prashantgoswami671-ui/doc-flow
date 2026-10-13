@@ -182,15 +182,23 @@ export class OllamaRuntime implements AiRuntime {
    * Provider-specific structured generation for the frozen Stage-1 /
    * Stage-2 contracts (V6-F02). Always sends `think: false` with the
    * caller-supplied JSON Schema `format` — the experimentally validated
-   * transport shape for this setup. No document context is attached;
-   * the prompt already carries the evidence pool. Availability gating
+   * transport shape for this setup. Availability gating
    * is the caller's job (D04/E01 acquire a gated runtime first), so no
    * availability re-check happens here.
+   *
+   * `contextChunks` is optional and defaults to no attached context
+   * (existing callers pass none and are unaffected): when supplied, the
+   * chunks travel through the same `[page N]` prompt composition as the
+   * generic text path, so per-chunk structured callers (Key Points) keep
+   * their existing prompt and chunk flow while gaining the `format`
+   * schema. Only already-extracted text may be supplied — never PDF
+   * bytes, files, or metadata (enforced by `AiContextChunk`).
    */
   async generateStructuredText(options: {
     prompt: string;
     format: OllamaJsonSchema;
     settings?: AiRequestSettings;
+    contextChunks?: AiContextChunk[];
   }): Promise<string> {
     if (this.disposed) {
       throw new OllamaRuntimeDisposedError();
@@ -208,7 +216,11 @@ export class OllamaRuntime implements AiRuntime {
       }
       return await this.client.generate(
         options.prompt,
-        undefined,
+        options.contextChunks?.map((chunk) => ({
+          text: chunk.text,
+          pageNumber: chunk.pageNumber,
+          chunkIndex: chunk.chunkIndex,
+        })),
         {
           temperature: options.settings?.temperature,
           maxOutputTokens: options.settings?.maxOutputTokens,
